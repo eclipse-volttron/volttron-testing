@@ -1,10 +1,7 @@
 """Tests suite for `testing`."""
 
 from pathlib import Path
+import sys
 
-TESTS_DIR = Path(__file__).parent
-TMP_DIR = TESTS_DIR / "tmp"
-FIXTURES_DIR = TESTS_DIR / "fixtures"
-
-"""Configuration for the pytest test suite."""
-
+if '../src' not in sys.path:
+    sys.path.insert(0, '../src')
