@@ -44,9 +44,10 @@ import gevent
 import pytest
 from mock import MagicMock
 
-from volttron.platform import get_services_core, get_examples, jsonapi
-from volttrontesting.utils.platformwrapper import PlatformWrapper, with_os_environ
-from volttrontesting.utils.utils import get_rand_tcp_address, get_rand_http_address
+from volttron.utils import jsonapi
+#from volttron.platform import get_services_core, get_examples
+from testing.volttron.platformwrapper import PlatformWrapper, with_os_environ
+from testing.volttron.utils import get_rand_tcp_address, get_rand_http_address
 
 
 @pytest.mark.parametrize("messagebus, ssl_auth", [
@@ -167,7 +168,7 @@ def test_instance_writes_to_instances_file(volttron_instance):
     assert the_instance_entry['volttron-home'] == vi.volttron_home
 
 
-@pytest.mark.skip(reason="To test actions on github")
+#@pytest.mark.skip(reason="To test actions on github")
 @pytest.mark.wrapper
 def test_can_install_listener(volttron_instance: PlatformWrapper):
     vi = volttron_instance
@@ -175,7 +176,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     assert vi.is_running()
 
     # agent identity should be
-    auuid = vi.install_agent(agent_dir=get_examples("ListenerAgent"),
+    auuid = vi.install_agent(agent_dir="/home/volttron/git/volttron-listener-agent",
                              start=False)
     assert auuid is not None
     time.sleep(1)
@@ -188,8 +189,9 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     listening.callback.reset_mock()
 
     assert listening.core.identity
+    agent_identity = listening.vip.rpc.call('control', 'agent_vip_identity', auuid).get(timeout=10)
     listening.vip.pubsub.subscribe(peer='pubsub',
-                                   prefix='heartbeat/{}'.format(vi.get_agent_identity(auuid)),
+                                   prefix='heartbeat/{}'.format(agent_identity),
                                    callback=listening.callback)
 
     # default heartbeat for core listener is 5 seconds.
@@ -202,7 +204,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     assert call_args[0] == 'pubsub'
     # TODO: This hard coded value should be changed with a platformwrapper call to a function
     # get_agent_identity(uuid)
-    assert call_args[1] == vi.get_agent_identity(auuid)
+    assert call_args[1] == agent_identity
     assert call_args[2] == ''
     assert call_args[3].startswith('heartbeat/listeneragent')
     assert 'max_compatible_version' in call_args[4]
@@ -298,7 +300,7 @@ def test_can_remove_agent(volttron_instance):
 
     # Install ListenerAgent as the agent to be removed.
     agent_uuid = volttron_instance.install_agent(
-        agent_dir=get_examples("ListenerAgent"), start=False)
+        agent_dir='/home/volttron/git/volttron-listener-agent', start=False)
     assert agent_uuid is not None
     started = volttron_instance.start_agent(agent_uuid)
     assert started is not None

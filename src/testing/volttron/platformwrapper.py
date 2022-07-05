@@ -20,33 +20,32 @@ import gevent
 import gevent.subprocess as subprocess
 import grequests
 
-from volttron.platform.vip.socket import encode_key, decode_key
-from volttrontesting.fixtures.cert_fixtures import certs_profile_2
-from .agent_additions import (add_volttron_central,
-                              add_volttron_central_platform)
+from volttron.utils.keystore import encode_key, decode_key
+from testing.fixtures.cert_fixtures import certs_profile_2
+# from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
-from volttron.platform import packaging, jsonapi
-from volttron.platform.agent.known_identities import PLATFORM_WEB, CONTROL, CONTROL_CONNECTION, PROCESS_IDENTITIES
-from volttron.platform.certs import Certs
-from volttron.platform.agent import utils
-from volttron.platform.agent.utils import (strip_comments,
-                                           load_platform_config,
-                                           store_message_bus_config, execute_command)
-from volttron.platform.aip import AIPplatform
-from volttron.platform.auth import (AuthFile, AuthEntry,
+# from volttron.platform import packaging
+from volttron.utils import jsonapi, strip_comments, store_message_bus_config, execute_command
+from volttron.client.known_identities import PLATFORM_WEB, CONTROL, CONTROL_CONNECTION, PROCESS_IDENTITIES
+from volttron.utils.certs import Certs
+from volttron.utils.commands import wait_for_volttron_startup, is_volttron_running
+from volttron.utils.logging import setup_logging
+from volttron.server.aip import AIPplatform
+from volttron.services.auth import (AuthFile, AuthEntry,
                                     AuthFileEntryAlreadyExists)
-from volttron.platform.keystore import KeyStore, KnownHostsStore
-from volttron.platform.vip.agent import Agent
-from volttron.platform.vip.agent.connection import Connection
-from volttrontesting.utils.utils import get_rand_http_address, get_rand_vip, get_hostname_and_random_port, \
-    get_rand_ip_and_port
-from volttrontesting.utils.utils import get_rand_tcp_address
-from volttrontesting.fixtures.rmq_test_setup import create_rmq_volttron_setup
-from volttron.utils.rmq_setup import start_rabbit, stop_rabbit
-from volttron.utils.rmq_setup import setup_rabbitmq_volttron
+from volttron.utils.keystore import KeyStore, KnownHostsStore
+from volttron.client.vip.agent import Agent
+from volttron.client.vip.agent.connection import Connection
+from testing.volttron.utils import get_rand_http_address, get_rand_vip, get_hostname_and_random_port, \
+    get_rand_ip_and_port, get_rand_tcp_address
+# from testing.fixtures.rmq_test_setup import create_rmq_volttron_setup
+# from volttron.utils.rmq_setup import start_rabbit, stop_rabbit
+# from volttron.utils.rmq_setup import setup_rabbitmq_volttron
 
-utils.setup_logging()
+from volttron.utils.context import ClientContext as cc
+
+setup_logging()
 _log = logging.getLogger(__name__)
 
 RESTRICTED_AVAILABLE = False
@@ -102,7 +101,7 @@ MODES = (UNRESTRICTED, VERIFY_ONLY, RESOURCE_CHECK_ONLY, RESTRICTED)
 
 VOLTTRON_ROOT = os.environ.get("VOLTTRON_ROOT")
 if not VOLTTRON_ROOT:
-    VOLTTRON_ROOT = dirname(dirname(dirname(os.path.realpath(__file__))))
+    VOLTTRON_ROOT = '/home/volttron/git/volttron-core' # dirname(dirname(dirname(os.path.realpath(__file__))))
 
 VSTART = "volttron"
 VCTRL = "volttron-ctl"
@@ -215,10 +214,15 @@ def with_os_environ(update_env: dict):
     """
     copy_env = os.environ.copy()
     os.environ.update(update_env)
+    vhome = (Path(os.environ.get("VOLTTRON_HOME", "~/.volttron")).expanduser().resolve())
+    copy_cc_vhome = cc.__volttron_home__
+    cc.__volttron_home__ = vhome
+
     try:
         yield
     finally:
         os.environ = copy_env
+        cc.__volttron_home__ = copy_cc_vhome
 
 
 class PlatformWrapper:
@@ -385,46 +389,46 @@ class PlatformWrapper:
                          publickey=None, secretkey=None, serverkey=None,
                          capabilities: Optional[dict] = None, **kwargs):
         self.logit('Building connection to {}'.format(peer))
-        os.environ.update(self.env)
-        self.allow_all_connections()
+        with with_os_environ(self.env):
+            self.allow_all_connections()
 
-        if identity is None:
-            # Set identity here instead of AuthEntry creating one and use that identity to create Connection class.
-            # This is to ensure that RMQ test cases get the correct current user that matches the auth entry made
-            identity = str(uuid.uuid4())
-        if address is None:
-            self.logit(
-                'Default address was None so setting to current instances')
-            address = self.vip_address
-            serverkey = self.serverkey
-        if serverkey is None:
-            self.logit("serverkey wasn't set but the address was.")
-            raise Exception("Invalid state.")
+            if identity is None:
+                # Set identity here instead of AuthEntry creating one and use that identity to create Connection class.
+                # This is to ensure that RMQ test cases get the correct current user that matches the auth entry made
+                identity = str(uuid.uuid4())
+            if address is None:
+                self.logit(
+                    'Default address was None so setting to current instances')
+                address = self.vip_address
+                serverkey = self.serverkey
+            if serverkey is None:
+                self.logit("serverkey wasn't set but the address was.")
+                raise Exception("Invalid state.")
 
-        if publickey is None or secretkey is None:
-            self.logit('generating new public secret key pair')
-            keyfile = tempfile.mktemp(".keys", "agent", self.volttron_home)
-            keys = KeyStore(keyfile)
-            keys.generate()
-            publickey = keys.public
-            secretkey = keys.secret
+            if publickey is None or secretkey is None:
+                self.logit('generating new public secret key pair')
+                keyfile = tempfile.mktemp(".keys", "agent", self.volttron_home)
+                keys = KeyStore(keyfile)
+                keys.generate()
+                publickey = keys.public
+                secretkey = keys.secret
 
-            entry = AuthEntry(capabilities=capabilities,
-                              comments="Added by test",
-                              credentials=keys.public,
-                              user_id=identity,
+                entry = AuthEntry(capabilities=capabilities,
+                                  comments="Added by test",
+                                  credentials=keys.public,
+                                  user_id=identity,
+                                  identity=identity)
+                file = AuthFile(self.volttron_home + "/auth.json")
+                file.add(entry)
+
+            conn = Connection(address=address, peer=peer, publickey=publickey,
+                              secretkey=secretkey, serverkey=serverkey,
+                              instance_name=self.instance_name,
+                              message_bus=self.messagebus,
+                              volttron_home=self.volttron_home,
                               identity=identity)
-            file = AuthFile(self.volttron_home + "/auth.json")
-            file.add(entry)
 
-        conn = Connection(address=address, peer=peer, publickey=publickey,
-                          secretkey=secretkey, serverkey=serverkey,
-                          instance_name=self.instance_name,
-                          message_bus=self.messagebus,
-                          volttron_home=self.volttron_home,
-                          identity=identity)
-
-        return conn
+            return conn
 
     def build_agent(self, address=None, should_spawn=True, identity=None,
                     publickey=None, secretkey=None, serverkey=None,
@@ -447,66 +451,66 @@ class PlatformWrapper:
         # Update OS env to current platform's env so get_home() call will result
         # in correct home director. Without this when more than one test instance are created, get_home()
         # will return home dir of last started platform wrapper instance
-        os.environ.update(self.env)
-        use_ipc = kwargs.pop('use_ipc', False)
+        with with_os_environ(self.env):
+            use_ipc = kwargs.pop('use_ipc', False)
 
-        # Make sure we have an identity or things will mess up
-        identity = identity if identity else str(uuid.uuid4())
+            # Make sure we have an identity or things will mess up
+            identity = identity if identity else str(uuid.uuid4())
 
-        if serverkey is None:
-            serverkey = self.serverkey
-        if publickey is None:
-            self.logit(f'generating new public secret key pair {KeyStore.get_agent_keystore_path(identity=identity)}')
-            ks = KeyStore(KeyStore.get_agent_keystore_path(identity=identity))
-            # ks.generate()
-            publickey = ks.public
-            secretkey = ks.secret
+            if serverkey is None:
+                serverkey = self.serverkey
+            if publickey is None:
+                self.logit(f'generating new public secret key pair {KeyStore.get_agent_keystore_path(identity=identity)}')
+                ks = KeyStore(KeyStore.get_agent_keystore_path(identity=identity))
+                # ks.generate()
+                publickey = ks.public
+                secretkey = ks.secret
 
-        if address is None:
-            self.logit('Using vip-address {address}'.format(
-                address=self.vip_address))
-            address = self.vip_address
+            if address is None:
+                self.logit('Using vip-address {address}'.format(
+                    address=self.vip_address))
+                address = self.vip_address
 
-        if publickey and not serverkey:
-            self.logit('using instance serverkey: {}'.format(publickey))
-            serverkey = publickey
-        self.logit("BUILD agent VOLTTRON HOME: {}".format(self.volttron_home))
-        if self.bind_web_address:
-            kwargs['enable_web'] = True
+            if publickey and not serverkey:
+                self.logit('using instance serverkey: {}'.format(publickey))
+                serverkey = publickey
+            self.logit("BUILD agent VOLTTRON HOME: {}".format(self.volttron_home))
+            if self.bind_web_address:
+                kwargs['enable_web'] = True
 
-        if 'enable_store' not in kwargs:
-            kwargs['enable_store'] = False
+            if 'enable_store' not in kwargs:
+                kwargs['enable_store'] = False
 
-        if capabilities is None:
-            capabilities = dict(edit_config_store=dict(identity=identity))
-        entry = AuthEntry(user_id=identity, identity=identity, credentials=publickey,
-                          capabilities=capabilities,
-                          comments="Added by platform wrapper")
-        authfile = AuthFile()
-        authfile.add(entry, overwrite=False, no_error=True)
-        # allow 2 seconds here for the auth to be updated in auth service
-        # before connecting to the platform with the agent.
-        #
-        gevent.sleep(3)
-        agent = agent_class(address=address, identity=identity,
-                            publickey=publickey, secretkey=secretkey,
-                            serverkey=serverkey,
-                            instance_name=self.instance_name,
-                            volttron_home=self.volttron_home,
-                            message_bus=self.messagebus,
-                            **kwargs)
-        self.logit('platformwrapper.build_agent.address: {}'.format(address))
+            if capabilities is None:
+                capabilities = dict(edit_config_store=dict(identity=identity))
+            entry = AuthEntry(user_id=identity, identity=identity, credentials=publickey,
+                              capabilities=capabilities,
+                              comments="Added by platform wrapper")
+            authfile = AuthFile()
+            authfile.add(entry, overwrite=False, no_error=True)
+            # allow 2 seconds here for the auth to be updated in auth service
+            # before connecting to the platform with the agent.
+            #
+            gevent.sleep(3)
+            agent = agent_class(address=address, identity=identity,
+                                publickey=publickey, secretkey=secretkey,
+                                serverkey=serverkey,
+                                instance_name=self.instance_name,
+                                volttron_home=self.volttron_home,
+                                message_bus=self.messagebus,
+                                **kwargs)
+            self.logit('platformwrapper.build_agent.address: {}'.format(address))
 
-        if should_spawn:
-            self.logit(f'platformwrapper.build_agent spawning for identity {identity}')
-            event = gevent.event.Event()
-            gevent.spawn(agent.core.run, event)
-            event.wait(timeout=2)
-            router_ping = agent.vip.ping("").get(timeout=30)
-            assert len(router_ping) > 0
+            if should_spawn:
+                self.logit(f'platformwrapper.build_agent spawning for identity {identity}')
+                event = gevent.event.Event()
+                gevent.spawn(agent.core.run, event)
+                event.wait(timeout=2)
+                router_ping = agent.vip.ping("").get(timeout=30)
+                assert len(router_ping) > 0
 
-        agent.publickey = publickey
-        return agent
+            agent.publickey = publickey
+            return agent
 
     def _read_auth_file(self):
         auth_path = os.path.join(self.volttron_home, 'auth.json')
@@ -535,13 +539,12 @@ class PlatformWrapper:
         authfile.add(entry, no_error=True)
 
     def add_vc(self):
-        os.environ.update(self.env)
-
-        return add_volttron_central(self)
+        with with_os_environ(self.env):
+            return add_volttron_central(self)
 
     def add_vcp(self):
-        os.environ.update(self.env)
-        return add_volttron_central_platform(self)
+        with with_os_environ(self.env):
+            return add_volttron_central_platform(self)
 
     def is_auto_csr_enabled(self):
         assert self.messagebus == 'rmq', 'Only available for rmq messagebus'
@@ -609,12 +612,10 @@ class PlatformWrapper:
                          # Allow the AuthFile to be preauthenticated with keys for service agents.
                          perform_preauth_service_agents=True):
 
+        # Update OS env to current platform's env so get_home() call will result
+        # in correct home director. Without this when more than one test instance are created, get_home()
+        # will return home dir of last started platform wrapper instance.
         with with_os_environ(self.env):
-            # Update OS env to current platform's env so get_home() call will result
-            # in correct home director. Without this when more than one test instance are created, get_home()
-            # will return home dir of last started platform wrapper instance
-            os.environ.update(self.env)
-
             # Add check and raise error if the platform is already running for this instance.
             if self.is_running():
                 raise PlatformWrapperError("Already running platform")
@@ -838,7 +839,7 @@ class PlatformWrapper:
             # A negative means that the process exited with an error.
             assert self.p_process.poll() is None
 
-            utils.wait_for_volttron_startup(self.volttron_home, timeout)
+            wait_for_volttron_startup(self.volttron_home, timeout)
 
             self.serverkey = self.keystore.public
             assert self.serverkey
@@ -918,7 +919,7 @@ class PlatformWrapper:
 
     def is_running(self):
         with with_os_environ(self.env):
-            return utils.is_volttron_running(self.volttron_home)
+            return is_volttron_running(self.volttron_home)
 
     def direct_sign_agentpackage_creator(self, package):
         assert RESTRICTED, "Auth not available"

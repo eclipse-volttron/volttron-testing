@@ -10,8 +10,8 @@ import gevent
 import mock
 import pytest
 
-from volttron.platform.agent import utils
-from volttron.platform.messaging import headers as headers_mod
+from volttron.utils import format_timestamp
+from volttron.client.messaging import headers as headers_mod
 
 
 def is_running_in_container():
@@ -132,7 +132,7 @@ def build_devices_header_and_message(points=['abc', 'def']):
         data[point] = random() * 10
         meta_data[point] = meta_templates[randint(0,len(meta_templates)-1)]
 
-    time1 = utils.format_timestamp( datetime.utcnow())
+    time1 = format_timestamp(datetime.utcnow())
     headers = {
         headers_mod.DATE: time1,
         headers_mod.TIMESTAMP: time1

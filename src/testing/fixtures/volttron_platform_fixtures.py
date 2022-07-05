@@ -8,19 +8,20 @@ from urllib.parse import urlparse
 import psutil
 import pytest
 
-from volttron.platform import is_rabbitmq_available, is_web_available
-from volttron.platform import update_platform_config
-from volttron.utils import get_random_key
-from volttrontesting.fixtures.cert_fixtures import certs_profile_1
-from volttrontesting.utils.platformwrapper import PlatformWrapper, with_os_environ
-from volttrontesting.utils.platformwrapper import create_volttron_home
-from volttrontesting.utils.utils import get_hostname_and_random_port, get_rand_vip, get_rand_ip_and_port
-from volttron.utils.rmq_mgmt import RabbitMQMgmt
-from volttron.utils.rmq_setup import start_rabbit
+from volttron.utils.context import ClientContext as cc
+# is_web_available
+#from volttron.platform import update_platform_config
+from volttron.utils.keystore import get_random_key
+from testing.fixtures.cert_fixtures import certs_profile_1
+from testing.volttron.platformwrapper import PlatformWrapper, with_os_environ
+from testing.volttron.platformwrapper import create_volttron_home
+from testing.volttron.utils import get_hostname_and_random_port, get_rand_vip, get_rand_ip_and_port
+# from volttron.utils.rmq_mgmt import RabbitMQMgmt
+# from volttron.utils.rmq_setup import start_rabbit
 
 PRINT_LOG_ON_SHUTDOWN = False
-HAS_RMQ = is_rabbitmq_available()
-HAS_WEB = is_web_available()
+HAS_RMQ = cc.is_rabbitmq_available()
+HAS_WEB = False # is_web_available()
 
 ci_skipif = pytest.mark.skipif(os.getenv('CI', None) == 'true', reason='SSL does not work in CI')
 rmq_skipif = pytest.mark.skipif(not HAS_RMQ,
