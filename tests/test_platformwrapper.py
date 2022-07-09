@@ -168,7 +168,7 @@ def test_instance_writes_to_instances_file(volttron_instance):
     assert the_instance_entry['volttron-home'] == vi.volttron_home
 
 
-#@pytest.mark.skip(reason="To test actions on github")
+# TODO: @pytest.mark.skip(reason="To test actions on github")
 @pytest.mark.wrapper
 def test_can_install_listener(volttron_instance: PlatformWrapper):
     vi = volttron_instance
@@ -206,7 +206,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     # get_agent_identity(uuid)
     assert call_args[1] == agent_identity
     assert call_args[2] == ''
-    assert call_args[3].startswith('heartbeat/listeneragent')
+    assert call_args[3].startswith('heartbeat/listener')
     assert 'max_compatible_version' in call_args[4]
     assert 'min_compatible_version' in call_args[4]
     assert 'TimeStamp' in call_args[4]
@@ -352,7 +352,7 @@ def test_can_publish(volttron_instance):
     assert messages['test/world']['message'] == 'got data'
 
 
-@pytest.mark.skip(reason="To test actions on github")
+# TODO: @pytest.mark.skip(reason="To test actions on github")
 @pytest.mark.wrapper
 def test_can_install_multiple_listeners(volttron_instance):
     assert volttron_instance.is_running()
@@ -364,9 +364,12 @@ def test_can_install_multiple_listeners(volttron_instance):
         for x in range(num_listeners):
             identity = "listener_" + str(x)
             auuid = volttron_instance.install_agent(
-                agent_dir=get_examples("ListenerAgent"), config_file={
+                agent_dir="/home/volttron/git/volttron-listener-agent",
+                config_file={
                     "agentid": identity,
-                    "message": "So Happpy"})
+                    "message": "So Happpy"},
+                vip_identity=identity
+            )
             assert auuid
             uuids.append(auuid)
             time.sleep(4)
