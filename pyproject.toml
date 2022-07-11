@@ -17,6 +17,7 @@ python = ">=3.8,<4.0"
 pytest = "^6.2.5"
 mock = "^4.0.3"
 volttron = {path = "../volttron-core", develop = true}
+anypubsub = "^0.6"
 
 [tool.poetry.dev-dependencies]
 # formatting, quality, tests
