@@ -33,12 +33,14 @@ class ServerResponse:
     called_method: str
     response: Any
 
+
 @dataclass
 class LogMessage:
     level: int | str
     message: str
     args: field(default_factory=list)
     kwargs: field(default_factory=dict)
+
 
 @dataclass
 class MessageWrapper:
@@ -193,7 +195,7 @@ class TestServer:
         Executes the @Core.receiver('onstop') marked method, if it was found on the
         connected agent.
 
-        :param identity:
+        :param identity_or_agent:
         :param sender:
         :param kwargs:
         :return:

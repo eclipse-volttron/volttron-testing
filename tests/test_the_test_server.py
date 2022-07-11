@@ -14,7 +14,7 @@ def test_instantiate():
     # assert ts.config.vip_address[0] == 'tcp://127.0.0.1:22916'
 
 
-def test_an_agent():
+def test_agent_subscription_and_logging():
     an_agent = Agent(identity="foo")
     ts = TestServer()
     assert ts
@@ -39,3 +39,7 @@ def test_an_agent():
     ts.publish('bnnel/foobar', message="Third message")
     assert len(on_messages_found) == 2
     assert len(subscriber.received_messages()) == 1
+
+
+def test_mock_rpc_call():
+    pass
