@@ -30,7 +30,7 @@ from volttron.utils import jsonapi, strip_comments, store_message_bus_config, ex
 from volttron.client.known_identities import PLATFORM_WEB, CONTROL, CONTROL_CONNECTION, PROCESS_IDENTITIES
 from volttron.utils.certs import Certs
 from volttron.utils.commands import wait_for_volttron_startup, is_volttron_running
-from volttron.utils.logging import setup_logging
+from volttron.utils.logs import setup_logging
 from volttron.server.aip import AIPplatform
 from volttron.services.auth import (AuthFile, AuthEntry,
                                     AuthFileEntryAlreadyExists)
