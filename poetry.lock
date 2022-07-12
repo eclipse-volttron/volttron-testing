@@ -7,6 +7,22 @@ optional = false
 python-versions = "*"
 
 [[package]]
+name = "anypubsub"
+version = "0.6"
+description = "A generic interface wrapping multiple backends to provide a consistent pubsub API."
+category = "main"
+optional = false
+python-versions = "*"
+
+[package.dependencies]
+six = "*"
+
+[package.extras]
+amqp = ["amqp (>=1.4.9)"]
+mongodb = ["pymongo (>=3)"]
+redis = ["redis (>2.10)"]
+
+[[package]]
 name = "atomicwrites"
 version = "1.4.0"
 description = "Atomic file writes."
@@ -890,12 +906,16 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.8,<4.0"
-content-hash = "da493350941f6338640e10ddb2ee994b71bd2832cee2867a7808ad7a0c6f23d8"
+content-hash = "483328e006cfc4f0ab43359e0d7ba33622508780b3da2a0f538ff2a23a00f353"
 
 [metadata.files]
 alabaster = [
     {file = "alabaster-0.7.12-py2.py3-none-any.whl", hash = "sha256:446438bdcca0e05bd45ea2de1668c1d9b032e1a9154c2c259092d77031ddd359"},
     {file = "alabaster-0.7.12.tar.gz", hash = "sha256:a661d72d58e6ea8a57f7a86e37d86716863ee5e92788398526d58b26a4e4dc02"},
+]
+anypubsub = [
+    {file = "anypubsub-0.6-py2.py3-none-any.whl", hash = "sha256:7f6e0ade707f1c7b40c08e25a7b0048cd3099e54b4d4a39d73429f000951ada4"},
+    {file = "anypubsub-0.6.tar.gz", hash = "sha256:57d48ba8932ae57ec91b386725a0acb23b208228eabd85c5409d8e7bb3c64412"},
 ]
 atomicwrites = [
     {file = "atomicwrites-1.4.0-py2.py3-none-any.whl", hash = "sha256:6d1784dea7c0c8d4a5172b6c620f40b6e4cbfdf96d783691f2e1302a7b88e197"},
