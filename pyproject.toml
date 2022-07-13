@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "volttron-testing"
-version = "0.1.1"
+version = "0.2.0"
 description = "None"
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache License 2.0"
@@ -8,7 +8,7 @@ readme = "README.md"
 repository = "https://github.com/VOLTTRON/volttron-testing"
 homepage = "https://github.com/VOLTTRON/volttron-testing"
 keywords = []
-packages = [ { include = "testing", from = "src" } ]
+packages = [ { include = "volttrontesting", from = "src" } ]
 
 [tool.poetry.dependencies]
 python = ">=3.8,<4.0"
