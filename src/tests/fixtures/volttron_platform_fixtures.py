@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 import shutil
 from typing import Optional
-from urllib.parse import urlparse
 
 import psutil
 import pytest
@@ -12,7 +11,7 @@ from volttron.utils.context import ClientContext as cc
 # is_web_available
 #from volttron.platform import update_platform_config
 from volttron.utils.keystore import get_random_key
-from testing.fixtures.cert_fixtures import certs_profile_1
+from fixtures.cert_fixtures import certs_profile_1
 from testing.volttron.platformwrapper import PlatformWrapper, with_os_environ
 from testing.volttron.platformwrapper import create_volttron_home
 from testing.volttron.utils import get_hostname_and_random_port, get_rand_vip, get_rand_ip_and_port
@@ -693,5 +692,3 @@ def two_way_federated_rmq_instances(request, **kwargs):
                                                     instance_2_link_name)
     instance_1.shutdown_platform()
     instance_2.shutdown_platform()
-
-

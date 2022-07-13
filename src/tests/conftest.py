@@ -1,9 +1,12 @@
-"""Tests suite for `testing`."""
-
-from pathlib import Path
 import sys
+from pathlib import Path
 
-if '../src' not in sys.path:
-    sys.path.insert(0, '..')
+p = Path(__file__)
+# Adds src dir to the path
+if p.parent.parent.resolve().as_posix() not in sys.path:
+    sys.path.insert(0, p.parent.parent.resolve().as_posix())
 
-from testing.fixtures.volttron_platform_fixtures import *
+if p.parent.resolve().as_posix() not in sys.path:
+    sys.path.insert(0, p.parent.resolve().as_posix())
+
+from fixtures.volttron_platform_fixtures import *

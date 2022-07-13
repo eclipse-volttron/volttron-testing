@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 import uuid
-from urllib.parse import urlencode
 
 import psutil
 import shutil
@@ -13,7 +12,6 @@ import tempfile
 import time
 import re
 from contextlib import closing, contextmanager
-from os.path import dirname
 from subprocess import CalledProcessError
 
 import gevent
@@ -21,7 +19,7 @@ import gevent.subprocess as subprocess
 import grequests
 
 from volttron.utils.keystore import encode_key, decode_key
-from testing.fixtures.cert_fixtures import certs_profile_2
+from fixtures.cert_fixtures import certs_profile_2
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
@@ -37,7 +35,7 @@ from volttron.services.auth import (AuthFile, AuthEntry,
 from volttron.utils.keystore import KeyStore, KnownHostsStore
 from volttron.client.vip.agent import Agent
 from volttron.client.vip.agent.connection import Connection
-from testing.volttron.utils import get_rand_http_address, get_rand_vip, get_hostname_and_random_port, \
+from testing.volttron.utils import get_rand_vip, get_hostname_and_random_port, \
     get_rand_ip_and_port, get_rand_tcp_address
 # from testing.fixtures.rmq_test_setup import create_rmq_volttron_setup
 # from volttron.utils.rmq_setup import start_rabbit, stop_rabbit
@@ -1554,8 +1552,6 @@ class WebAdminApi:
         :param password:
         :return:
         """
-        from volttron.platform.web.admin_endpoints import AdminEndpoints
-        from volttrontesting.utils.web_utils import get_test_web_env
 
         # params = urlencode(dict(username='admin', password1='admin', password2='admin'))
         # env = get_test_web_env("/admin/setpassword", method='POST')  # , input_data=input)
