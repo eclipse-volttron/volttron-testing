@@ -1,9 +1,9 @@
 import logging
 
-from testing.volttron import TestServer
+from volttrontesting import TestServer
 from volttron.client import Agent
 
-from testing.volttron.memory_pubsub import PublishedMessage
+from volttrontesting.memory_pubsub import PublishedMessage
 
 
 def test_instantiate():

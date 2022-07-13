@@ -6,14 +6,11 @@ import inspect
 from enum import Enum
 import re
 from logging import Logger
-from queue import Queue
-from typing import Dict, Callable, Any, Tuple, List, Type, Optional
+from typing import Dict, Callable, Any, Tuple, List, Optional
 
-from testing.volttron.memory_pubsub import MemoryPubSub, MemorySubscriber, PublishedMessage
+from volttrontesting.memory_pubsub import MemoryPubSub, MemorySubscriber, PublishedMessage
 
 from volttron.client import Agent
-from volttron.client.vip.agent import PubSub
-from volttron.client.vip.agent.results import AsyncResult
 
 
 @dataclass

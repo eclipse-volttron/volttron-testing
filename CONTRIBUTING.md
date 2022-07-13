@@ -15,7 +15,7 @@ Nothing easier!
 Fork and clone the repository, then:
 
 ```bash
-cd volttron-testing
+cd volttron-volttrontesting
 make setup
 ```
 
