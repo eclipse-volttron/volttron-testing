@@ -2,7 +2,7 @@
 
 # -- Project information
 
-project = 'volttron-testing'
+project = 'volttron-volttrontesting'
 copyright = '2022, PNNL'
 author = 'PNNL'
 

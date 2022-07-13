@@ -9,4 +9,4 @@ if p.parent.parent.resolve().as_posix() not in sys.path:
 if p.parent.resolve().as_posix() not in sys.path:
     sys.path.insert(0, p.parent.resolve().as_posix())
 
-from fixtures.volttron_platform_fixtures import *
+from volttrontesting.fixtures.volttron_platform_fixtures import *

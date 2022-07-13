@@ -46,8 +46,8 @@ from mock import MagicMock
 
 from volttron.utils import jsonapi
 #from volttron.platform import get_services_core, get_examples
-from testing.volttron.platformwrapper import PlatformWrapper, with_os_environ
-from testing.volttron.utils import get_rand_tcp_address, get_rand_http_address
+from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
+from volttrontesting.utils import get_rand_tcp_address, get_rand_http_address
 
 
 @pytest.mark.parametrize("messagebus, ssl_auth", [
@@ -176,7 +176,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     assert vi.is_running()
 
     # agent identity should be
-    auuid = vi.install_agent(agent_dir="/repos/volttron-listener-agent",
+    auuid = vi.install_agent(agent_dir="/home/volttron/git/volttron-listener-agent",
                              start=False)
     assert auuid is not None
     time.sleep(1)
@@ -362,7 +362,7 @@ def test_can_install_multiple_listeners(volttron_instance):
         for x in range(num_listeners):
             identity = "listener_" + str(x)
             auuid = volttron_instance.install_agent(
-                agent_dir="/repos/volttron-listener-agent",
+                agent_dir="/home/volttron/git/volttron-listener-agent",
                 config_file={
                     "agentid": identity,
                     "message": "So Happpy"},

@@ -11,10 +11,10 @@ from volttron.utils.context import ClientContext as cc
 # is_web_available
 #from volttron.platform import update_platform_config
 from volttron.utils.keystore import get_random_key
-from fixtures.cert_fixtures import certs_profile_1
-from testing.volttron.platformwrapper import PlatformWrapper, with_os_environ
-from testing.volttron.platformwrapper import create_volttron_home
-from testing.volttron.utils import get_hostname_and_random_port, get_rand_vip, get_rand_ip_and_port
+from volttrontesting.fixtures.cert_fixtures import certs_profile_1
+from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
+from volttrontesting.platformwrapper import create_volttron_home
+from volttrontesting.utils import get_hostname_and_random_port, get_rand_vip, get_rand_ip_and_port
 # from volttron.utils.rmq_mgmt import RabbitMQMgmt
 # from volttron.utils.rmq_setup import start_rabbit
 
@@ -113,7 +113,7 @@ def volttron_instance_module_web(request):
                     pytest.param(dict(messagebus='rmq', ssl_auth=True), marks=rmq_skipif),
                 ])
 def volttron_instance(request, **kwargs):
-    """Fixture that returns a single instance of volttron platform for testing
+    """Fixture that returns a single instance of volttron platform for volttrontesting
 
     @param request: pytest request object
     @return: volttron platform instance
@@ -162,7 +162,7 @@ def get_volttron_instances(request):
 
     @param request: pytest request object
     @return: function that can used to get any number of
-        volttron instances for testing.
+        volttron instances for volttrontesting.
     """
     instances = []
 
@@ -211,7 +211,7 @@ def get_volttron_instances(request):
 # test
 @pytest.fixture(scope="module")
 def volttron_instance_zmq(request):
-    """Fixture that returns a single instance of volttron platform for testing
+    """Fixture that returns a single instance of volttron platform for volttrontesting
 
     @param request: pytest request object
     @return: volttron platform instance
@@ -229,7 +229,7 @@ def volttron_instance_zmq(request):
 # test
 @pytest.fixture(scope="module")
 def volttron_instance_rmq(request):
-    """Fixture that returns a single instance of volttron platform for testing
+    """Fixture that returns a single instance of volttron platform for volttrontesting
 
     @param request: pytest request object
     @return: volttron platform instance

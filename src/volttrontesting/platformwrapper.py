@@ -19,7 +19,7 @@ import gevent.subprocess as subprocess
 import grequests
 
 from volttron.utils.keystore import encode_key, decode_key
-from fixtures.cert_fixtures import certs_profile_2
+from volttrontesting.fixtures.cert_fixtures import certs_profile_2
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
@@ -35,9 +35,9 @@ from volttron.services.auth import (AuthFile, AuthEntry,
 from volttron.utils.keystore import KeyStore, KnownHostsStore
 from volttron.client.vip.agent import Agent
 from volttron.client.vip.agent.connection import Connection
-from testing.volttron.utils import get_rand_vip, get_hostname_and_random_port, \
+from volttrontesting.utils import get_rand_vip, get_hostname_and_random_port, \
     get_rand_ip_and_port, get_rand_tcp_address
-# from testing.fixtures.rmq_test_setup import create_rmq_volttron_setup
+# from volttrontesting.fixtures.rmq_test_setup import create_rmq_volttron_setup
 # from volttron.utils.rmq_setup import start_rabbit, stop_rabbit
 # from volttron.utils.rmq_setup import setup_rabbitmq_volttron
 
@@ -177,7 +177,7 @@ def start_wrapper_platform(wrapper, with_http=False, with_tcp=True,
 
 def create_volttron_home() -> str:
     """
-    Creates a VOLTTRON_HOME temp directory for use within a testing context.
+    Creates a VOLTTRON_HOME temp directory for use within a volttrontesting context.
     This function will return a string containing the VOLTTRON_HOME but will not
     set the global variable.
 
@@ -1304,7 +1304,7 @@ class PlatformWrapper:
         wheel_path = packaging.create_package(agent_dir,
                                               self.packaged_dir)
         packaging.add_files_to_package(wheel_path, {
-            'config_file': os.path.join('./', config_file)
+            'config_file': os.path.join('volttron/', config_file)
         })
 
         return wheel_path
@@ -1493,7 +1493,7 @@ class PlatformWrapper:
     def cleanup(self):
         """
         Cleanup all resources created for test purpose if debug_mode is false.
-        Restores orignial rabbitmq.conf if testing with rmq
+        Restores orignial rabbitmq.conf if volttrontesting with rmq
         :return:
         """
 

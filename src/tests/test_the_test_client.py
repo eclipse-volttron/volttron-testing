@@ -1,4 +1,4 @@
-from testing.volttron import TestClient
+from volttrontesting import TestClient
 
 
 def test_instantiate():

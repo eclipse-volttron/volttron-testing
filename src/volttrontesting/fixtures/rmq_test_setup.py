@@ -116,7 +116,7 @@ class RabbitTestConfig:
 def create_rmq_volttron_setup(vhome=None, ssl_auth=False, env=None,
                               instance_name=None, secure_agent_users=False) -> RabbitTestConfig:
     """
-        Set-up rabbitmq broker for volttron testing:
+        Set-up rabbitmq broker for volttron volttrontesting:
             - Install config and rabbitmq_config.yml in VOLTTRON_HOME
             - Create virtual host, exchanges, certificates, and users
             - Start rabbitmq server
