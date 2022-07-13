@@ -12,11 +12,8 @@ packages = [ { include = "testing", from = "src" } ]
 
 [tool.poetry.dependencies]
 python = ">=3.8,<4.0"
-# TODO: uncomment when volttron 0.1.0 is available
-# volttron = "^0.1.0"
 pytest = "^6.2.5"
 mock = "^4.0.3"
-volttron = {path = "../volttron-core", develop = true}
 anypubsub = "^0.6"
 volttron = "^10.0.1-alpha.13"
 
