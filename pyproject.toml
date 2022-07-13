@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "volttron-testing"
-version = "0.1.0"
+version = "0.1.1"
 description = "None"
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache License 2.0"
@@ -12,13 +12,11 @@ packages = [ { include = "testing", from = "src" } ]
 
 [tool.poetry.dependencies]
 python = ">=3.8,<4.0"
-# TODO: uncomment when volttron 0.1.0 is available
-# volttron = "^0.1.0"
 pytest = "^6.2.5"
 mock = "^4.0.3"
-# volttron = {path = "../volttron-core", develop = true}
 anypubsub = "^0.6"
 volttron = "^10.0.1-alpha.13"
+grequests = "^0.6.0"
 
 [tool.poetry.dev-dependencies]
 # formatting, quality, tests

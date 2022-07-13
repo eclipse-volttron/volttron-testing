@@ -176,7 +176,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     assert vi.is_running()
 
     # agent identity should be
-    auuid = vi.install_agent(agent_dir="/home/volttron/git/volttron-listener-agent",
+    auuid = vi.install_agent(agent_dir="/repos/volttron-listener-agent",
                              start=False)
     assert auuid is not None
     time.sleep(1)
@@ -202,11 +202,9 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     call_args = listening.callback.call_args[0]
     # peer, sender, bus, topic, headers, message
     assert call_args[0] == 'pubsub'
-    # TODO: This hard coded value should be changed with a platformwrapper call to a function
-    # get_agent_identity(uuid)
     assert call_args[1] == agent_identity
     assert call_args[2] == ''
-    assert call_args[3].startswith('heartbeat/listener')
+    assert call_args[3].startswith(f'heartbeat/{agent_identity}')
     assert 'max_compatible_version' in call_args[4]
     assert 'min_compatible_version' in call_args[4]
     assert 'TimeStamp' in call_args[4]
@@ -364,7 +362,7 @@ def test_can_install_multiple_listeners(volttron_instance):
         for x in range(num_listeners):
             identity = "listener_" + str(x)
             auuid = volttron_instance.install_agent(
-                agent_dir="/home/volttron/git/volttron-listener-agent",
+                agent_dir="/repos/volttron-listener-agent",
                 config_file={
                     "agentid": identity,
                     "message": "So Happpy"},
@@ -408,4 +406,3 @@ def test_will_update_environ():
         assert os.environ.get("farthing") == "50"
 
     assert "farthing" not in os.environ
-
