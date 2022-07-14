@@ -104,7 +104,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish pre-release to pypi
-        if: github.repository == 'VOLTTRON/volttron-core'
+        if: github.repository == 'VOLTTRON/volttron-testing'
         run: |
           # poetry config repositories.test-pypi https://test.pypi.org/legacy/
           # poetry config pypi-token.test-pypi ${{ secrets.TEST_PYPI_TOKEN }}
