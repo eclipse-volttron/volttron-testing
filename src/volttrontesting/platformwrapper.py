@@ -52,15 +52,8 @@ RESTRICTED_AVAILABLE = False
 # of 30 secondes
 DEFAULT_TIMEOUT = 5
 
-try:
-    from volttron.restricted import (auth, certs)
-
-    RESTRICTED_AVAILABLE = True
-
-except ImportError:
-    RESTRICTED_AVAILABLE = False
-    auth = None
-    certs = None
+auth = None
+certs = None
 
 # Filenames for the config files which are created during setup and then
 # passed on the command line
@@ -241,6 +234,8 @@ class PlatformWrapper:
         self._instance_shutdown = False
 
         self.volttron_home = create_volttron_home()
+        # this is the user home directory that will be used for this instance
+        self.user_home = Path(self.volttron_home).parent.resolve().as_posix()
         # log file is one level above volttron_home now
         self.log_path = os.path.join(os.path.dirname(self.volttron_home), "volttron.log")
 
@@ -256,14 +251,13 @@ class PlatformWrapper:
         # in the context of this platform it is very important not to
         # use the main os.environ for anything.
         self.env = {
+            'HOME': self.user_home,
             'VOLTTRON_HOME': self.volttron_home,
             'PACKAGED_DIR': self.packaged_dir,
             'DEBUG_MODE': os.environ.get('DEBUG_MODE', ''),
             'DEBUG': os.environ.get('DEBUG', ''),
             'SKIP_CLEANUP': os.environ.get('SKIP_CLEANUP', ''),
             'PATH': path,
-            # RABBITMQ requires HOME env set
-            'HOME': os.environ.get('HOME'),
             # Elixir (rmq pre-req) requires locale to be utf-8
             'LANG': "en_US.UTF-8",
             'LC_ALL': "en_US.UTF-8",
