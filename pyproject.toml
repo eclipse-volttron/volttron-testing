@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "volttron-testing"
-version = "0.2.0"
+version = "0.3.0"
 description = "None"
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache License 2.0"
@@ -18,7 +18,7 @@ anypubsub = "^0.6"
 volttron = "^10.0.1-alpha.13"
 grequests = "^0.6.0"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 # formatting, quality, tests
 pre-commit = "^2.17.0"
 yapf = "^0.32.0"
