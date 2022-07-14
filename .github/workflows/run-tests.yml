@@ -2,10 +2,10 @@ name: Run Pytests
 
 on:
   push:
-    branches:
-      - main
-      - develop
-      - releases/**
+    branches: '*'
+#      - main
+#      - develop
+#      - releases/**
     paths:
       - '**.py'
       - '**.yml'
