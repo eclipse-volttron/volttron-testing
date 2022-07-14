@@ -6,7 +6,6 @@ on:
     - main
     - develop
     - github-actions-update
-    
   pull_request:
     branches:
     - main
