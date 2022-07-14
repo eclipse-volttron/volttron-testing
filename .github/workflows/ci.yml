@@ -4,6 +4,8 @@ on:
   push:
     branches:
     - main
+    - develop
+    - github-actions-update
   pull_request:
     branches:
     - main
@@ -71,8 +73,8 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest]
-        python-version: [3.8, 3.9, 3.10.0]
+        os: [ubuntu-22.04, ubuntu-20.04]
+        python-version: [3.8, 3.9, 3.10]
 
     runs-on: ${{ matrix.os }}
 
