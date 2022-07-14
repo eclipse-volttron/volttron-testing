@@ -14,13 +14,11 @@ env:
   LANG: en_US.utf-8
   LC_ALL: en_US.utf-8
   PYTHON_VERSION: '3.8'
-  PROJECT_NAME: test-release-actions
   RUNS_ON: ubuntu-20.04
 
 jobs:
 
   bump_version:
-    environment: test_env
     runs-on: ubuntu-20.04
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
