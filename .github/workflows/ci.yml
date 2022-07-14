@@ -1,15 +1,11 @@
 name: ci
 
 on:
-#  push:
-#    branches:
-#    - main
-#    - develop
+  push:
+    branches: [ "main" ]
   pull_request:
-    types: '*'
-    branches:
-    - main
-    - develop
+    branches: [ "main" ]
+
 
 defaults:
   run:
