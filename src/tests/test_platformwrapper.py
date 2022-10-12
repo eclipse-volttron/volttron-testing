@@ -43,9 +43,10 @@ import grequests
 import gevent
 import pytest
 from mock import MagicMock
+from volttron.client.known_identities import CONTROL
 
 from volttron.utils import jsonapi
-#from volttron.platform import get_services_core, get_examples
+# from volttron.platform import get_services_core, get_examples
 from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
 from volttrontesting.utils import get_rand_tcp_address, get_rand_http_address
 
@@ -98,7 +99,6 @@ def test_can_create_web_enabled(messagebus: str, https_enabled: bool):
     assert not p.is_running()
 
 
-@pytest.mark.wrapper
 def test_volttron_config_created(volttron_instance):
     config_file = os.path.join(volttron_instance.volttron_home, "config")
     assert os.path.isfile(config_file)
@@ -110,7 +110,6 @@ def test_volttron_config_created(volttron_instance):
     assert volttron_instance.messagebus == parser.get('volttron', 'message-bus')
 
 
-@pytest.mark.wrapper
 def test_can_restart_platform_without_addresses_changing(get_volttron_instances):
     inst_forward, inst_target = get_volttron_instances(2)
 
@@ -124,7 +123,6 @@ def test_can_restart_platform_without_addresses_changing(get_volttron_instances)
     assert original_vip == inst_forward.vip_address
 
 
-@pytest.mark.wrapper
 def test_can_restart_platform(volttron_instance):
     orig_vip = volttron_instance.vip_address
     orig_vhome = volttron_instance.volttron_home
@@ -147,7 +145,6 @@ def test_can_restart_platform(volttron_instance):
     assert len(volttron_instance.dynamic_agent.vip.peerlist().get()) > 0
 
 
-@pytest.mark.wrapper
 def test_instance_writes_to_instances_file(volttron_instance):
     vi = volttron_instance
     assert vi is not None
@@ -172,7 +169,6 @@ def test_instance_writes_to_instances_file(volttron_instance):
 
 # TODO: @pytest.mark.skip(reason="To test actions on github")
 @pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
-@pytest.mark.wrapper
 def test_can_install_listener(volttron_instance: PlatformWrapper):
     vi = volttron_instance
     assert vi is not None
@@ -192,7 +188,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     listening.callback.reset_mock()
 
     assert listening.core.identity
-    agent_identity = listening.vip.rpc.call('control', 'agent_vip_identity', auuid).get(timeout=10)
+    agent_identity = listening.vip.rpc.call(CONTROL, 'agent_vip_identity', auuid).get(timeout=10)
     listening.vip.pubsub.subscribe(peer='pubsub',
                                    prefix='heartbeat/{}'.format(agent_identity),
                                    callback=listening.callback)
@@ -222,7 +218,6 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
 
 # TODO: @pytest.mark.skip(reason="To test actions on github")
 @pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
-@pytest.mark.wrapper
 def test_reinstall_agent(volttron_instance):
     sqlite_config = {
         "connection": {
@@ -251,7 +246,6 @@ def test_reinstall_agent(volttron_instance):
     volttron_instance.remove_agent(newuuid)
 
 
-@pytest.mark.wrapper
 def test_can_stop_vip_heartbeat(volttron_instance):
     clear_messages()
     vi = volttron_instance
@@ -285,7 +279,6 @@ def test_can_stop_vip_heartbeat(volttron_instance):
     assert not messages_contains_prefix('heartbeat/Agent')
 
 
-@pytest.mark.wrapper
 def test_get_peerlist(volttron_instance):
     vi = volttron_instance
     agent = vi.build_agent()
@@ -297,7 +290,6 @@ def test_get_peerlist(volttron_instance):
 
 # TODO: @pytest.mark.skip(reason="To test actions on github")
 @pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
-@pytest.mark.wrapper
 def test_can_remove_agent(volttron_instance):
     """ Confirms that 'volttron-ctl remove' removes agent as expected. """
     assert volttron_instance is not None
@@ -337,7 +329,6 @@ def messages_contains_prefix(prefix):
     return any([x.startswith(prefix) for x in list(messages.keys())])
 
 
-@pytest.mark.wrapper
 def test_can_publish(volttron_instance):
     global messages
     clear_messages()
@@ -359,7 +350,6 @@ def test_can_publish(volttron_instance):
 
 # TODO: @pytest.mark.skip(reason="To test actions on github")
 @pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
-@pytest.mark.wrapper
 def test_can_install_multiple_listeners(volttron_instance):
     assert volttron_instance.is_running()
     volttron_instance.remove_all_agents()
@@ -383,7 +373,7 @@ def test_can_install_multiple_listeners(volttron_instance):
         for u in uuids:
             assert volttron_instance.is_agent_running(u)
 
-        agent_list = volttron_instance.dynamic_agent.vip.rpc('control', 'list_agents').get(timeout=5)
+        agent_list = volttron_instance.dynamic_agent.vip.rpc(CONTROL, 'list_agents').get(timeout=5)
         print('Agent List: {}'.format(agent_list))
         assert len(agent_list) == num_listeners
     finally:
@@ -391,19 +381,19 @@ def test_can_install_multiple_listeners(volttron_instance):
             try:
                 volttron_instance.remove_agent(x)
             except:
-                print('COULDN"T REMOVE AGENT')
+                print(f"COULDN'T REMOVE AGENT {x}")
 
 
 def test_will_update_throws_typeerror():
     # Note dictionary for os.environ must be string=string for key=value
 
     to_update = dict(shanty=dict(holy="cow"))
-    #with pytest.raises(TypeError):
+    # with pytest.raises(TypeError):
     with with_os_environ(to_update):
         print("Should not reach here")
 
     to_update = dict(bogus=35)
-#    with pytest.raises(TypeError):
+    #    with pytest.raises(TypeError):
     with with_os_environ(to_update):
         print("Should not reach here")
 
