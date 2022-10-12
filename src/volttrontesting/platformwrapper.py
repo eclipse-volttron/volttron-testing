@@ -1208,7 +1208,7 @@ class PlatformWrapper:
 
     def list_agents(self):
         with with_os_environ(self.env):
-            agent_list = self.dynamic_agent.vip.rpc('control', 'list_agents').get(timeout=10)
+            agent_list = self.dynamic_agent.vip.rpc(CONTROL, 'list_agents').get(timeout=10)
             return agent_list
 
     def remove_agent(self, agent_uuid):
@@ -1233,9 +1233,9 @@ class PlatformWrapper:
         with with_os_environ(self.env):
             if self._instance_shutdown:
                 return
-            agent_list = self.dynamic_agent.vip.rpc('control', 'list_agents').get(timeout=10)
+            agent_list = self.dynamic_agent.vip.rpc(CONTROL, 'list_agents').get(timeout=10)
             for agent_props in agent_list:
-                self.dynamic_agent.vip.rpc('control', 'remove_agent', agent_props['uuid']).get(timeout=10)
+                self.dynamic_agent.vip.rpc(CONTROL, 'remove_agent', agent_props['uuid']).get(timeout=10)
                 time.sleep(0.2)
 
     def is_agent_running(self, agent_uuid):
