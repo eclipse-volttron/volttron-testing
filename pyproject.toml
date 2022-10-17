@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "volttron-testing"
-version = "0.3.0"
+version = "0.4.0"
 description = "None"
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache License 2.0"
