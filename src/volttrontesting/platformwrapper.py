@@ -19,7 +19,6 @@ import gevent.subprocess as subprocess
 import grequests
 
 from volttron.utils.keystore import encode_key, decode_key
-from volttrontesting.fixtures.cert_fixtures import certs_profile_2
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
@@ -262,21 +261,14 @@ class PlatformWrapper:
             'LANG': "en_US.UTF-8",
             'LC_ALL': "en_US.UTF-8",
             'PYTHONDONTWRITEBYTECODE': '1',
-            'VOLTTRON_ROOT': VOLTTRON_ROOT
+            'VOLTTRON_ROOT': VOLTTRON_ROOT,
+            'HTTPS_PROXY': os.environ.get('HTTPS_PROXY', ''),
+            'https_proxy': os.environ.get('https_proxy', '')
         }
         self.volttron_root = VOLTTRON_ROOT
         self.vctl_exe = 'volttron-ctl'
         self.volttron_exe = 'volttron'
         self.python = sys.executable
-
-        # By default no web server should be started.
-        self.bind_web_address = None
-        self.discovery_address = None
-        self.jsonrpc_endpoint = None
-        self.volttron_central_address = None
-        self.volttron_central_serverkey = None
-        self.instance_name = instance_name
-        self.serverkey = None
 
         # The main volttron process will be under this variable
         # after startup_platform happens.
@@ -297,7 +289,7 @@ class PlatformWrapper:
 
         # This is used as command line entry replacement.  Especially working
         # with older 2.0 agents.
-        self.opts = None
+        self.opts = {}
 
         keystorefile = os.path.join(self.volttron_home, 'keystore')
         self.keystore = KeyStore(keystorefile)
@@ -332,12 +324,6 @@ class PlatformWrapper:
                 self.debug_mode = self.env.get('DEBUG', False)
             self.skip_cleanup = self.env.get('SKIP_CLEANUP', False)
 
-            self._web_admin_api = None
-
-    @property
-    def web_admin_api(self):
-        return self._web_admin_api
-
     def get_identity_keys(self, identity: str):
         with with_os_environ(self.env):
             if not Path(KeyStore.get_agent_keystore_path(identity)).exists():
@@ -359,11 +345,6 @@ class PlatformWrapper:
                 authfile.add(entry)
             except AuthFileEntryAlreadyExists:
                 pass
-
-            if self.messagebus == 'rmq' and self.bind_web_address is not None:
-                self.enable_auto_csr()
-            # if self.bind_web_address is not None:
-            #     self.web_admin_api.create_web_admin('admin', 'admin', self.messagebus)
 
     def get_agent_identity(self, agent_uuid):
         identity = None
@@ -467,8 +448,6 @@ class PlatformWrapper:
                 self.logit('using instance serverkey: {}'.format(publickey))
                 serverkey = publickey
             self.logit("BUILD agent VOLTTRON HOME: {}".format(self.volttron_home))
-            if self.bind_web_address:
-                kwargs['enable_web'] = True
 
             if 'enable_store' not in kwargs:
                 kwargs['enable_store'] = False
@@ -530,31 +509,6 @@ class PlatformWrapper:
         authfile = AuthFile(self.volttron_home + "/auth.json")
         authfile.add(entry, no_error=True)
 
-    def add_vc(self):
-        with with_os_environ(self.env):
-            return add_volttron_central(self)
-
-    def add_vcp(self):
-        with with_os_environ(self.env):
-            return add_volttron_central_platform(self)
-
-    def is_auto_csr_enabled(self):
-        assert self.messagebus == 'rmq', 'Only available for rmq messagebus'
-        assert self.bind_web_address, 'Must have a web based instance'
-        return self.dynamic_agent.vip.rpc(PLATFORM_WEB, 'is_auto_allow_csr').get()
-
-    def enable_auto_csr(self):
-        assert self.messagebus == 'rmq', 'Only available for rmq messagebus'
-        assert self.bind_web_address, 'Must have a web based instance'
-        self.dynamic_agent.vip.rpc(PLATFORM_WEB, 'auto_allow_csr', True).get()
-        assert self.is_auto_csr_enabled()
-
-    def disable_auto_csr(self):
-        assert self.messagebus == 'rmq', 'Only available for rmq messagebus'
-        assert self.bind_web_address, 'Must have a web based instance'
-        self.dynamic_agent.vip.rpc(PLATFORM_WEB, 'auto_allow_csr', False).get()
-        assert not self.is_auto_csr_enabled()
-
     def add_capabilities(self, publickey, capabilities):
         with with_os_environ(self.env):
             if isinstance(capabilities, str) or isinstance(capabilities, dict):
@@ -594,9 +548,7 @@ class PlatformWrapper:
                 fd.write(jsonapi.dumps(auth_dict))
 
     def startup_platform(self, vip_address, auth_dict=None,
-                         mode=UNRESTRICTED, bind_web_address=None,
-                         volttron_central_address=None,
-                         volttron_central_serverkey=None,
+                         mode=UNRESTRICTED,
                          msgdebug=False,
                          setupmode=False,
                          agent_monitor_frequency=600,
@@ -614,9 +566,6 @@ class PlatformWrapper:
 
             self.vip_address = vip_address
             self.mode = mode
-            self.volttron_central_address = volttron_central_address
-            self.volttron_central_serverkey = volttron_central_serverkey
-            self.bind_web_address = bind_web_address
 
             if perform_preauth_service_agents:
                 authfile = AuthFile()
@@ -678,38 +627,6 @@ class PlatformWrapper:
             self.local_vip_address = ipc + 'vip.socket'
             self.set_auth_dict(auth_dict)
 
-            web_ssl_cert = None
-            web_ssl_key = None
-            if self.messagebus == 'rmq' and bind_web_address:
-                self.env['REQUESTS_CA_BUNDLE'] = self.certsobj.cert_file(self.certsobj.root_ca_name)
-
-            # Enable SSL for ZMQ
-            elif self.messagebus == 'zmq' and self.ssl_auth and bind_web_address:
-                web_certs = certs_profile_2(os.path.join(self.volttron_home, "certificates"))
-                web_ssl_cert = web_certs['server_certs'][0]['cert_file']
-                web_ssl_key = web_certs['server_certs'][0]['key_file']
-            # # Add platform key to known-hosts file:
-            # known_hosts = KnownHostsStore()
-            # known_hosts.add(opts.vip_local_address, encode_key(publickey))
-            # for addr in opts.vip_address:
-            #     known_hosts.add(addr, encode_key(publickey))
-
-            if self.bind_web_address:
-                # Create web users for platform web authentication
-                # from volttron.platform.web.admin_endpoints import AdminEndpoints
-                # from volttrontesting.utils.web_utils import get_test_web_env
-                # adminep = AdminEndpoints()
-                # params = urlencode(dict(username='admin', password1='admin', password2='admin'))
-                # env = get_test_web_env("/admin/setpassword", method='POST')  # , input_data=input)
-                # response = adminep.admin(env, params)
-                # print(f"RESPONSE 1: {response}")
-                self.discovery_address = "{}/discovery/".format(
-                    self.bind_web_address)
-
-                # Only available if vc is installed!
-                self.jsonrpc_endpoint = "{}/vc/jsonrpc".format(
-                    self.bind_web_address)
-
             if self.remote_platform_ca:
                 ca_bundle_file = os.path.join(self.volttron_home, "cat_ca_certs")
                 with open(ca_bundle_file, 'w') as cf:
@@ -725,25 +642,23 @@ class PlatformWrapper:
             # the platform starts up.
             self.requests_ca_bundle = self.env.get('REQUESTS_CA_BUNDLE')
 
-            self.opts = {'verify_agents': False,
-                         'volttron_home': self.volttron_home,
-                         'vip_address': vip_address,
-                         'vip_local_address': ipc + 'vip.socket',
-                         'publish_address': ipc + 'publish',
-                         'subscribe_address': ipc + 'subscribe',
-                         'bind_web_address': bind_web_address,
-                         'volttron_central_address': volttron_central_address,
-                         'volttron_central_serverkey': volttron_central_serverkey,
-                         'secure_agent_users': self.secure_agent_users,
-                         'platform_name': None,
-                         'log': self.log_path,
-                         'log_config': None,
-                         'monitor': True,
-                         'autostart': True,
-                         'log_level': logging.DEBUG,
-                         'verboseness': logging.DEBUG,
-                         'web_ca_cert': self.requests_ca_bundle}
-
+            self.opts.update({
+                'verify_agents': False,
+                'vip_address': vip_address,
+                'volttron_home': self.volttron_home,
+                'vip_local_address': ipc + 'vip.socket',
+                'publish_address': ipc + 'publish',
+                'subscribe_address': ipc + 'subscribe',
+                'secure_agent_users': self.secure_agent_users,
+                'platform_name': None,
+                'log': self.log_path,
+                'log_config': None,
+                'monitor': True,
+                'autostart': True,
+                'log_level': logging.DEBUG,
+                'verboseness': logging.DEBUG,
+                'web_ca_cert': self.requests_ca_bundle
+            })
             pconfig = os.path.join(self.volttron_home, 'config')
             config = {}
 
@@ -758,18 +673,6 @@ class PlatformWrapper:
             parser = configparser.ConfigParser()
             parser.add_section('volttron')
             parser.set('volttron', 'vip-address', vip_address)
-            if bind_web_address:
-                parser.set('volttron', 'bind-web-address', bind_web_address)
-            if web_ssl_cert:
-                parser.set('volttron', 'web-ssl-cert', web_ssl_cert)
-            if web_ssl_key:
-                parser.set('volttron', 'web-ssl-key', web_ssl_key)
-            if volttron_central_address:
-                parser.set('volttron', 'volttron-central-address',
-                           volttron_central_address)
-            if volttron_central_serverkey:
-                parser.set('volttron', 'volttron-central-serverkey',
-                           volttron_central_serverkey)
             if self.instance_name:
                 parser.set('volttron', 'instance-name',
                            self.instance_name)
@@ -810,6 +713,10 @@ class PlatformWrapper:
             else:
                 raise PlatformWrapperError(
                     "Invalid platform mode specified: {}".format(mode))
+
+            # # write the default service_config.yml file
+            # with service_config_file.open("wt") as fp:
+            #     yaml.dump(default_configs, fp)
 
             cmd = [self.volttron_exe]
             # if msgdebug:
@@ -868,43 +775,6 @@ class PlatformWrapper:
                 #     self.logit(logged)
                 #
                 # self.dynamic_agent.vip.pubsub.subscribe('pubsub', '', subscribe_to_all).get()
-
-            if bind_web_address:
-                # Now that we know we have web and we are using ssl then we
-                # can enable the WebAdminApi.
-                # if self.ssl_auth:
-                self._web_admin_api = WebAdminApi(self)
-                self._web_admin_api.create_web_admin("admin", "admin")
-                times = 0
-                has_discovery = False
-                error_was = None
-
-                while times < 10:
-                    times += 1
-                    try:
-                        if self.ssl_auth:
-                            resp = grequests.get(self.discovery_address,
-                                                verify=self.certsobj.cert_file(self.certsobj.root_ca_name)
-                                                ).send().response
-                        else:
-                            resp = grequests.get(self.discovery_address).send().response
-                        if resp.ok:
-                            self.logit("Has discovery address for {}".format(self.discovery_address))
-                            if self.requests_ca_bundle:
-                                self.logit("Using REQUESTS_CA_BUNDLE: {}".format(self.requests_ca_bundle))
-                            else:
-                                self.logit("Not using requests_ca_bundle for message bus: {}".format(self.messagebus))
-                            has_discovery = True
-                            break
-                    except Exception as e:
-                        gevent.sleep(0.5)
-                        error_was = e
-                        self.logit("Connection error found {}".format(e))
-                if not has_discovery:
-                    if error_was:
-                        raise error_was
-                    raise Exception("Couldn't connect to discovery platform.")
-
 
         if self.is_running():
             self._instance_shutdown = False
@@ -987,7 +857,6 @@ class PlatformWrapper:
         with with_os_environ(self.env):
             if not self.is_running():
                 raise PlatformWrapperError("Instance isn't running!")
-
 
             for path, config, start in agent_configs:
                 results = self.install_agent(agent_dir=path, config_file=config,
@@ -1352,7 +1221,6 @@ class PlatformWrapper:
                                     max_retries=5,
                                     env=self.env)
 
-
     def restart_platform(self):
         with with_os_environ(self.env):
             original_skip_cleanup = self.skip_cleanup
@@ -1361,9 +1229,6 @@ class PlatformWrapper:
             self.skip_cleanup = original_skip_cleanup
             # since this is a restart, we don't want to do an update/overwrite of services.
             self.startup_platform(vip_address=self.vip_address,
-                                  bind_web_address=self.bind_web_address,
-                                  volttron_central_address=self.volttron_central_address,
-                                  volttron_central_serverkey=self.volttron_central_serverkey,
                                   perform_preauth_service_agents=False)
             # we would need to reset shutdown flag so that platform is properly cleaned up on the next shutdown call
             self._instance_shutdown = False
@@ -1532,56 +1397,3 @@ def mergetree(src, dst, symlinks=False, ignore=None):
             if not os.path.exists(d) or os.stat(src).st_mtime - os.stat(
                     dst).st_mtime > 1:
                 shutil.copy2(s, d)
-
-
-class WebAdminApi:
-    def __init__(self, platform_wrapper: PlatformWrapper = None):
-        if platform_wrapper is None:
-            platform_wrapper = PlatformWrapper()
-        assert platform_wrapper.is_running(), "Platform must be running"
-        assert platform_wrapper.bind_web_address, "Platform must have web address"
-        # assert platform_wrapper.ssl_auth, "Platform must be ssl enabled"
-
-        self._wrapper = platform_wrapper
-        self.bind_web_address = self._wrapper.bind_web_address
-        self.certsobj = self._wrapper.certsobj
-
-    def create_web_admin(self, username, password, messagebus='rmq'):
-        """ Creates a global administrator user for the platform https interface.
-
-        :param username:
-        :param password:
-        :return:
-        """
-
-        # params = urlencode(dict(username='admin', password1='admin', password2='admin'))
-        # env = get_test_web_env("/admin/setpassword", method='POST')  # , input_data=input)
-        # adminep = AdminEndpoints()
-        # resp = adminep.admin(env, params)
-        # # else:
-        data = dict(username=username, password1=password, password2=password)
-        url = self.bind_web_address + "/admin/setpassword"
-        # resp = requests.post(url, data=data,
-        # verify=self.certsobj.remote_cert_bundle_file())
-
-        if self._wrapper.ssl_auth:
-            resp = grequests.post(url, data=data,
-                                 verify=self.certsobj.cert_file(self.certsobj.root_ca_name)).send().response
-        else:
-            resp = grequests.post(url, data=data, verify=False).send().response
-        print(f"RESPONSE: {resp}")
-        return resp
-
-    def authenticate(self, username, password):
-        data = dict(username=username, password=password)
-        url = self.bind_web_address + "/authenticate"
-        # Passing dictionary to the data argument will automatically pass as
-        # application/x-www-form-urlencoded to the request
-        # resp = requests.post(url, data=data,
-        # verify=self.certsobj.remote_cert_bundle_file())
-        if self._wrapper.ssl_auth:
-            resp = grequests.post(url, data=data,
-                                 verify=self.certsobj.cert_file(self.certsobj.root_ca_name)).send().response
-        else:
-            resp = grequests.post(url, data=data, verify=False).send().response
-        return resp

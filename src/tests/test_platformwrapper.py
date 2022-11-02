@@ -39,14 +39,12 @@ from configparser import ConfigParser
 import time
 import os
 
-import grequests
 import gevent
 import pytest
 from mock import MagicMock
-from volttron.client.known_identities import CONTROL
 
+from volttron.client.known_identities import CONTROL
 from volttron.utils import jsonapi
-# from volttron.platform import get_services_core, get_examples
 from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
 from volttrontesting.utils import get_rand_tcp_address, get_rand_http_address
 
@@ -70,34 +68,6 @@ def test_can_create(messagebus, ssl_auth):
             p.shutdown_platform()
 
     assert not p.is_running()
-
-
-@pytest.mark.parametrize("messagebus, https_enabled", [
-    ('zmq', False)
-    # TODO: Test enable generation of certs to support https
-    # , ('zmq', True)
-    # , ('zmq', False)
-    # , ('rmq', True)
-])
-@pytest.mark.skip("Need to install volttron-web-service here for available of web")
-def test_can_create_web_enabled(messagebus: str, https_enabled: bool):
-    p = PlatformWrapper(messagebus=messagebus)
-    try:
-        assert not p.is_running()
-        assert p.volttron_home.startswith("/tmp/tmp")
-        http_address = get_rand_http_address(https=https_enabled)
-        p.startup_platform(vip_address=get_rand_tcp_address(), bind_web_address=http_address)
-        assert p.is_running()
-        result = grequests.get(http_address, verify=False).send()
-        assert result
-        response = result.response
-        assert response.ok
-    finally:
-        if p:
-            p.shutdown_platform()
-
-    assert not p.is_running()
-
 
 def test_volttron_config_created(volttron_instance):
     config_file = os.path.join(volttron_instance.volttron_home, "config")
@@ -127,7 +97,6 @@ def test_can_restart_platform(volttron_instance):
     orig_vip = volttron_instance.vip_address
     orig_vhome = volttron_instance.volttron_home
     orig_bus = volttron_instance.messagebus
-    orig_bind = volttron_instance.bind_web_address
     orig_proc = volttron_instance.p_process.pid
 
     assert volttron_instance.is_running()
@@ -139,7 +108,6 @@ def test_can_restart_platform(volttron_instance):
     assert orig_vip == volttron_instance.vip_address
     assert orig_vhome == volttron_instance.volttron_home
     assert orig_bus == volttron_instance.messagebus
-    assert orig_bind == volttron_instance.bind_web_address
     # Expecation that we won't have the same pid after we restart the platform.
     assert orig_proc != volttron_instance.p_process.pid
     assert len(volttron_instance.dynamic_agent.vip.peerlist().get()) > 0
@@ -175,8 +143,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     assert vi.is_running()
 
     # agent identity should be
-    auuid = vi.install_agent(agent_dir="/home/volttron/git/volttron-listener-agent",
-                             start=False)
+    auuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a2", start=False)
     assert auuid is not None
     time.sleep(1)
     started = vi.start_agent(auuid)
@@ -219,31 +186,18 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
 # TODO: @pytest.mark.skip(reason="To test actions on github")
 @pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
 def test_reinstall_agent(volttron_instance):
-    sqlite_config = {
-        "connection": {
-            "type": "sqlite",
-            "params": {
-                "database": "data/historian.sqlite"
-            }
-        }
-    }
-    auuid = volttron_instance.install_agent(
-        agent_dir=get_services_core("SQLHistorian"),
-        config_file=sqlite_config,
-        start=True,
-        vip_identity='test_historian')
+    vi = volttron_instance
+    assert vi is not None
+    assert vi.is_running()
+
+    auuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a2", start=True, vip_identity="test_listener")
     assert volttron_instance.is_agent_running(auuid)
 
-    newuuid = volttron_instance.install_agent(
-        agent_dir=get_services_core("SQLHistorian"),
-        config_file=sqlite_config,
-        start=True,
-        force=True,
-        vip_identity='test_historian')
-
-    assert volttron_instance.is_agent_running(newuuid)
+    newuuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a2", start=True, force=True,
+                               vip_identity="test_listener")
+    assert vi.is_agent_running(newuuid)
     assert auuid != newuuid and auuid is not None
-    volttron_instance.remove_agent(newuuid)
+    vi.remove_agent(newuuid)
 
 
 def test_can_stop_vip_heartbeat(volttron_instance):
@@ -297,7 +251,7 @@ def test_can_remove_agent(volttron_instance):
 
     # Install ListenerAgent as the agent to be removed.
     agent_uuid = volttron_instance.install_agent(
-        agent_dir='/home/volttron/git/volttron-listener-agent', start=False)
+        agent_dir='volttron-listener>=0.1.2a2', start=False)
     assert agent_uuid is not None
     started = volttron_instance.start_agent(agent_uuid)
     assert started is not None
@@ -360,7 +314,7 @@ def test_can_install_multiple_listeners(volttron_instance):
         for x in range(num_listeners):
             identity = "listener_" + str(x)
             auuid = volttron_instance.install_agent(
-                agent_dir="/home/volttron/git/volttron-listener-agent",
+                agent_dir="volttron-listener>=0.1.2a2",
                 config_file={
                     "agentid": identity,
                     "message": "So Happpy"},
