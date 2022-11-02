@@ -214,6 +214,11 @@ def test_reinstall_agent(volttron_instance):
     assert vi.is_running()
 
     auuid = vi.install_agent(agent_dir="volttron-listener", start=True, vip_identity="test_listener")
+    vi = volttron_instance
+    assert vi is not None
+    assert vi.is_running()
+
+    auuid = vi.install_agent(agent_dir="volttron-listener", start=True, vip_identity="test_listener")
     assert volttron_instance.is_agent_running(auuid)
 
     newuuid = vi.install_agent(agent_dir="volttron-listener", start=True, force=True,
