@@ -298,8 +298,6 @@ class PlatformWrapper:
 
         self.services = {}
 
-        self.services = {}
-
         keystorefile = os.path.join(self.volttron_home, 'keystore')
         self.keystore = KeyStore(keystorefile)
         self.keystore.generate()
