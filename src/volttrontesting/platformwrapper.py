@@ -23,6 +23,7 @@ import yaml
 
 from volttron.types.server_config import ServiceConfigs, ServerConfig
 from volttron.utils.keystore import encode_key, decode_key
+from volttrontesting.fixtures.cert_fixtures import certs_profile_2
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
