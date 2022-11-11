@@ -342,14 +342,14 @@ def test_will_update_throws_typeerror():
     # Note dictionary for os.environ must be string=string for key=value
 
     to_update = dict(shanty=dict(holy="cow"))
-    # with pytest.raises(TypeError):
-    with with_os_environ(to_update):
-        print("Should not reach here")
+    with pytest.raises(TypeError):
+        with with_os_environ(to_update):
+            print("Should not reach here")
 
     to_update = dict(bogus=35)
-    #    with pytest.raises(TypeError):
-    with with_os_environ(to_update):
-        print("Should not reach here")
+    with pytest.raises(TypeError):
+        with with_os_environ(to_update):
+            print("Should not reach here")
 
 
 def test_will_update_environ():

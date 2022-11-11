@@ -19,6 +19,7 @@ import gevent.subprocess as subprocess
 import grequests
 
 from volttron.utils.keystore import encode_key, decode_key
+from volttrontesting.fixtures.cert_fixtures import certs_profile_2
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
@@ -270,6 +271,8 @@ class PlatformWrapper:
         self.volttron_exe = 'volttron'
         self.python = sys.executable
 
+        self.serverkey = None
+
         # The main volttron process will be under this variable
         # after startup_platform happens.
         self.p_process = None
@@ -310,12 +313,12 @@ class PlatformWrapper:
             self.requests_ca_bundle = None
             self.dynamic_agent: Optional[Agent] = None
 
-            if self.messagebus == 'rmq':
-                self.rabbitmq_config_obj = create_rmq_volttron_setup(vhome=self.volttron_home,
-                                                                     ssl_auth=self.ssl_auth,
-                                                                     env=self.env,
-                                                                     instance_name=self.instance_name,
-                                                                     secure_agent_users=secure_agent_users)
+            # if self.messagebus == 'rmq':
+            #     self.rabbitmq_config_obj = create_rmq_volttron_setup(vhome=self.volttron_home,
+            #                                                          ssl_auth=self.ssl_auth,
+            #                                                          env=self.env,
+            #                                                          instance_name=self.instance_name,
+            #                                                          secure_agent_users=secure_agent_users)
 
             self.certsobj = Certs(os.path.join(self.volttron_home, "certificates"))
 
@@ -1150,27 +1153,27 @@ class PlatformWrapper:
             pass
         return pid
 
-    def build_agentpackage(self, agent_dir, config_file={}):
-        if isinstance(config_file, dict):
-            cfg_path = os.path.join(agent_dir, "config_temp")
-            with open(cfg_path, "w") as tmp_cfg:
-                tmp_cfg.write(jsonapi.dumps(config_file))
-            config_file = cfg_path
-
-        # Handle relative paths from the volttron git directory.
-        if not os.path.isabs(agent_dir):
-            agent_dir = os.path.join(self.volttron_root, agent_dir)
-
-        assert os.path.exists(config_file)
-        assert os.path.exists(agent_dir)
-
-        wheel_path = packaging.create_package(agent_dir,
-                                              self.packaged_dir)
-        packaging.add_files_to_package(wheel_path, {
-            'config_file': os.path.join('volttron/', config_file)
-        })
-
-        return wheel_path
+    # def build_agentpackage(self, agent_dir, config_file={}):
+    #     if isinstance(config_file, dict):
+    #         cfg_path = os.path.join(agent_dir, "config_temp")
+    #         with open(cfg_path, "w") as tmp_cfg:
+    #             tmp_cfg.write(jsonapi.dumps(config_file))
+    #         config_file = cfg_path
+    #
+    #     # Handle relative paths from the volttron git directory.
+    #     if not os.path.isabs(agent_dir):
+    #         agent_dir = os.path.join(self.volttron_root, agent_dir)
+    #
+    #     assert os.path.exists(config_file)
+    #     assert os.path.exists(agent_dir)
+    #
+    #     wheel_path = packaging.create_package(agent_dir,
+    #                                           self.packaged_dir)
+    #     packaging.add_files_to_package(wheel_path, {
+    #         'config_file': os.path.join('volttron/', config_file)
+    #     })
+    #
+    #     return wheel_path
 
     def confirm_agent_running(self, agent_name, max_retries=5,
                               timeout_seconds=2):
@@ -1190,36 +1193,36 @@ class PlatformWrapper:
             time.sleep(timeout_seconds)
         return running
 
-    def setup_federation(self, config_path):
-        """
-        Set up federation using the given config path
-        :param config_path: path to federation config yml file.
-        """
-        with with_os_environ(self.env):
-            print(f"VHOME WITH with_os_environ: {os.environ['VOLTTRON_HOME']}")
-            setup_rabbitmq_volttron('federation',
-                                    verbose=False,
-                                    prompt=False,
-                                    instance_name=self.instance_name,
-                                    rmq_conf_file=self.rabbitmq_config_obj.rmq_conf_file,
-                                    max_retries=5,
-                                    env=self.env)
-
-
-    def setup_shovel(self, config_path):
-        """
-        Set up shovel using the given config path
-        :param config_path: path to shovel config yml file.
-        """
-        with with_os_environ(self.env):
-            print(f"VHOME WITH with_os_environ: {os.environ['VOLTTRON_HOME']}")
-            setup_rabbitmq_volttron('shovel',
-                                    verbose=False,
-                                    prompt=False,
-                                    instance_name=self.instance_name,
-                                    rmq_conf_file=self.rabbitmq_config_obj.rmq_conf_file,
-                                    max_retries=5,
-                                    env=self.env)
+    # def setup_federation(self, config_path):
+    #     """
+    #     Set up federation using the given config path
+    #     :param config_path: path to federation config yml file.
+    #     """
+    #     with with_os_environ(self.env):
+    #         print(f"VHOME WITH with_os_environ: {os.environ['VOLTTRON_HOME']}")
+    #         setup_rabbitmq_volttron('federation',
+    #                                 verbose=False,
+    #                                 prompt=False,
+    #                                 instance_name=self.instance_name,
+    #                                 rmq_conf_file=self.rabbitmq_config_obj.rmq_conf_file,
+    #                                 max_retries=5,
+    #                                 env=self.env)
+    #
+    #
+    # def setup_shovel(self, config_path):
+    #     """
+    #     Set up shovel using the given config path
+    #     :param config_path: path to shovel config yml file.
+    #     """
+    #     with with_os_environ(self.env):
+    #         print(f"VHOME WITH with_os_environ: {os.environ['VOLTTRON_HOME']}")
+    #         setup_rabbitmq_volttron('shovel',
+    #                                 verbose=False,
+    #                                 prompt=False,
+    #                                 instance_name=self.instance_name,
+    #                                 rmq_conf_file=self.rabbitmq_config_obj.rmq_conf_file,
+    #                                 max_retries=5,
+    #                                 env=self.env)
 
     def restart_platform(self):
         with with_os_environ(self.env):
@@ -1340,9 +1343,9 @@ class PlatformWrapper:
                     proc.terminate()
 
             self.logit(f"VHOME: {self.volttron_home}, Skip clean up flag is {self.skip_cleanup}")
-            if self.messagebus == 'rmq':
-                self.logit("Calling rabbit shutdown")
-                stop_rabbit(rmq_home=self.rabbitmq_config_obj.rmq_home, env=self.env, quite=True)
+            # if self.messagebus == 'rmq':
+            #     self.logit("Calling rabbit shutdown")
+            #     stop_rabbit(rmq_home=self.rabbitmq_config_obj.rmq_home, env=self.env, quite=True)
             if not self.skip_cleanup:
                 self.__remove_home_directory__()
 
