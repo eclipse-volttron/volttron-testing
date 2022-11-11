@@ -79,7 +79,7 @@ def add_sql_historian(wrapper, config, vip_identity='platform.historian',
                      **kwargs):
     agent_uuid = wrapper.install_agent(
         config_file=config,
-        agent_dir="volttron-lib-sql-historian",
+        agent_dir="volttron-sqlite-historian",
         vip_identity=vip_identity,
         **kwargs
     )
@@ -90,7 +90,7 @@ def add_mongo_historian(wrapper, config, vip_identity='platform.historian',
                        **kwargs):
     agent_uuid = wrapper.install_agent(
         config_file=config,
-        agent_dir="volttron-lib-mongo-historian",
+        agent_dir="volttron-mongo-historian",
         vip_identity=vip_identity,
         **kwargs
     )
@@ -128,7 +128,7 @@ def add_forward_historian(wrapper, config=None, **kwargs):
     config = config if config else {}
     agent_uuid = wrapper.install_agent(
         config_file=config,
-        agent_dir="volttron-lib-forward-historian",
+        agent_dir="volttron-forward-historian",
         **kwargs
     )
     return agent_uuid
