@@ -17,7 +17,9 @@ from subprocess import CalledProcessError
 import gevent
 import gevent.subprocess as subprocess
 import grequests
+import yaml
 
+from volttron.types.server_config import ServiceConfigs, ServerConfig
 from volttron.utils.keystore import encode_key, decode_key
 from volttrontesting.fixtures.cert_fixtures import certs_profile_2
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
@@ -294,6 +296,8 @@ class PlatformWrapper:
         # with older 2.0 agents.
         self.opts = {}
 
+        self.services = {}
+
         keystorefile = os.path.join(self.volttron_home, 'keystore')
         self.keystore = KeyStore(keystorefile)
         self.keystore.generate()
@@ -326,6 +330,7 @@ class PlatformWrapper:
             if not self.debug_mode:
                 self.debug_mode = self.env.get('DEBUG', False)
             self.skip_cleanup = self.env.get('SKIP_CLEANUP', False)
+            self.server_config = ServerConfig()
 
     def get_identity_keys(self, identity: str):
         with with_os_environ(self.env):
@@ -337,6 +342,25 @@ class PlatformWrapper:
 
     def logit(self, message):
         print('{}: {}'.format(self.volttron_home, message))
+
+    def add_service_config(self, service_name, enabled=True, **kwargs):
+        """Add a configuration for an existing service to be configured.
+
+        This must be called before the startup_platform method in order
+        for it to have any effect.  kwargs will be transferred into the service_config.yml
+        file under the service_name passed.
+        """
+        assert service_name in self.get_service_names(), "Only discovered services can be configured"
+        self.services[service_name] = {}
+        self.services[service_name]["enabled"] = enabled
+        self.services[service_name]["kwargs"] = kwargs
+
+    def get_service_names(self):
+        """Retrieve the names of services available to configure.
+        """
+        services = ServiceConfigs(Path(self.volttron_home).joinpath("service_configyml"),
+                                  ServerConfig())
+        return services.get_service_names()
 
     def allow_all_connections(self):
         """ Add a /.*/ entry to the auth.json file.
@@ -698,24 +722,12 @@ class PlatformWrapper:
 
                 self.certsobj = Certs(certsdir)
 
-            if self.mode == UNRESTRICTED:
-                with open(pconfig, 'w') as cfg:
-                    parser.write(cfg)
+            with open(pconfig, 'w') as cfg:
+                parser.write(cfg)
 
-            elif self.mode == RESTRICTED:
-                if not RESTRICTED_AVAILABLE:
-                    raise ValueError("restricted is not available.")
-
-                certsdir = os.path.join(self.volttron_home, 'certificates')
-
-                print("certsdir", certsdir)
-                self.certsobj = Certs(certsdir)
-
-                with closing(open(pconfig, 'w')) as cfg:
-                    cfg.write(PLATFORM_CONFIG_RESTRICTED.format(**config))
-            else:
-                raise PlatformWrapperError(
-                    "Invalid platform mode specified: {}".format(mode))
+            if self.services:
+                with Path(self.volttron_home).joinpath("service_config.yml").open('wt') as fp:
+                    yaml.dump(fp, self.services)
 
             # # write the default service_config.yml file
             # with service_config_file.open("wt") as fp:
