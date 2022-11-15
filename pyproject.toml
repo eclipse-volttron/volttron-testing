@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "volttron-testing"
-version = "0.4.0"
+version = "0.30.0"
 description = "None"
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache License 2.0"
@@ -16,7 +16,8 @@ pytest = "^6.2.5"
 mock = "^4.0.3"
 anypubsub = "^0.6"
 grequests = "^0.6.0"
-volttron = "^10.0.1a28"
+volttron = "^10.0.1a30"
+#volttron = {path="../volttron-core", develop=true}
 
 [tool.poetry.group.dev.dependencies]
 # formatting, quality, tests
