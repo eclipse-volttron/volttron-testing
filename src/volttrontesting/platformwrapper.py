@@ -314,9 +314,10 @@ class PlatformWrapper:
             self.instance_name = os.path.basename(os.path.dirname(self.volttron_home))
 
         with with_os_environ(self.env):
-
-            # Writes the main volttron config file for this instance.
+            from volttron.utils import ClientContext
             store_message_bus_config(self.messagebus, self.instance_name)
+            ClientContext.__load_config__()
+            # Writes the main volttron config file for this instance.
 
             self.remote_platform_ca = remote_platform_ca
             self.requests_ca_bundle = None
