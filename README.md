@@ -1,6 +1,6 @@
 # volttron-testing
 
-[![ci](https://github.com/eclipse-volttron/volttron-testing/workflows/ci/badge.svg)](https://github.com/eclipse-volttron/volttron-testing/actions?query=workflow%3Aci)
+[![Run Pytests](https://github.com/eclipse-volttron/volttron-testing/actions/workflows/run-tests.yml/badge.svg)](https://github.com/eclipse-volttron/volttron-testing/actions/workflows/run-tests.yml)
 [![pypi version](https://img.shields.io/pypi/v/volttron-testing.svg)](https://pypi.org/project/volttron-testing/)
 
 ## Prerequisites
