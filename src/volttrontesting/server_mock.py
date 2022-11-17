@@ -8,6 +8,8 @@ import re
 from logging import Logger
 from typing import Dict, Callable, Any, Tuple, List, Optional
 
+from gevent.event import AsyncResult
+
 from volttrontesting.memory_pubsub import MemoryPubSub, MemorySubscriber, PublishedMessage
 
 from volttron.client import Agent
@@ -226,6 +228,8 @@ class TestServer:
                 core_names_found = __find_lifecycle_methods__(obj)
                 self.__lifecycle_methods__[agent.core.identity] = self.__get_lifecycle_dict__(agent, core_names_found)
 
+        if PubSubWrapper.__wrapper__ is None:
+            PubSubWrapper.__wrapper__ = self.__server_pubsub__
         self.__pubsub_wrappers__[agent.core.identity] = PubSubWrapper(agent, self)
         self.__server_log__.add_agent_log(agent, logger)
 
@@ -263,6 +267,8 @@ class ServerLogWrapper:
             def fn_wrapper(msg, *args, **kwargs):
                 self._log_messages.append(LogMessage(level=level, message=msg, args=args, kwargs=kwargs))
             return fn_wrapper
+        if logger is None:
+            logger = logging.getLogger()
         logger.debug = wrapper(logging.DEBUG)
         logger.info = wrapper(logging.INFO)
         logger.error = wrapper(logging.ERROR)
@@ -283,7 +289,7 @@ class HeartBeatWrapper(SubSystemWrapper):
 
 
 class PubSubWrapper(SubSystemWrapper):
-    __wrapper__: MemoryPubSub
+    __wrapper__: MemoryPubSub | None = None
 
     def __init__(self, agent: Agent, server: TestServer):
         super().__init__()
@@ -296,8 +302,10 @@ class PubSubWrapper(SubSystemWrapper):
         print("on message")
 
     def _do_publish(self, peer: str, topic: str, headers=None, message=None, bus=""):
-        print("Do publish")
-        #return AsyncResult()
+        self.__wrapper__.publish(topic=topic, headers=headers, message=message)
+        result = AsyncResult()
+        result.set(topic)
+        return result
 
     def _do_subscribe(self, peer, prefix, callback, bus="", all_platforms=False, persistent_queue=None):
         anysub = self._test_server.subscribe(prefix, callback=callback)
