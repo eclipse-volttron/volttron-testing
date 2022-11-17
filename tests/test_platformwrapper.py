@@ -49,6 +49,28 @@ from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
 from volttrontesting.utils import get_rand_tcp_address, get_rand_http_address
 
 
+def test_will_update_throws_typeerror():
+    # Note dictionary for os.environ must be string=string for key=value
+
+    to_update = dict(shanty=dict(holy="cow"))
+    with pytest.raises(TypeError):
+        with_os_environ(to_update)
+        print("Should not reach here")
+
+    to_update = dict(bogus=35)
+    with pytest.raises(TypeError):
+        with_os_environ(to_update)
+        print("Should not reach here")
+
+
+def test_will_update_environ():
+    to_update = dict(farthing="50")
+    with with_os_environ(to_update):
+        assert os.environ.get("farthing") == "50"
+
+    assert "farthing" not in os.environ
+
+
 @pytest.mark.parametrize("messagebus, ssl_auth", [
     ('zmq', False)
     # , ('zmq', False)
@@ -68,6 +90,7 @@ def test_can_create(messagebus, ssl_auth):
             p.shutdown_platform()
 
     assert not p.is_running()
+
 
 def test_volttron_config_created(volttron_instance):
     config_file = os.path.join(volttron_instance.volttron_home, "config")
@@ -143,7 +166,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     assert vi.is_running()
 
     # agent identity should be
-    auuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a2", start=False)
+    auuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a6", start=False)
     assert auuid is not None
     time.sleep(1)
     started = vi.start_agent(auuid)
@@ -190,10 +213,10 @@ def test_reinstall_agent(volttron_instance):
     assert vi is not None
     assert vi.is_running()
 
-    auuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a2", start=True, vip_identity="test_listener")
+    auuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a6", start=True, vip_identity="test_listener")
     assert volttron_instance.is_agent_running(auuid)
 
-    newuuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a2", start=True, force=True,
+    newuuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a6", start=True, force=True,
                                vip_identity="test_listener")
     assert vi.is_agent_running(newuuid)
     assert auuid != newuuid and auuid is not None
@@ -251,7 +274,7 @@ def test_can_remove_agent(volttron_instance):
 
     # Install ListenerAgent as the agent to be removed.
     agent_uuid = volttron_instance.install_agent(
-        agent_dir='volttron-listener>=0.1.2a2', start=False)
+        agent_dir='volttron-listener>=0.1.2a6', start=False)
     assert agent_uuid is not None
     started = volttron_instance.start_agent(agent_uuid)
     assert started is not None
@@ -314,7 +337,7 @@ def test_can_install_multiple_listeners(volttron_instance):
         for x in range(num_listeners):
             identity = "listener_" + str(x)
             auuid = volttron_instance.install_agent(
-                agent_dir="volttron-listener>=0.1.2a2",
+                agent_dir="volttron-listener>=0.1.2a6",
                 config_file={
                     "agentid": identity,
                     "message": "So Happpy"},
@@ -336,25 +359,3 @@ def test_can_install_multiple_listeners(volttron_instance):
                 volttron_instance.remove_agent(x)
             except:
                 print(f"COULDN'T REMOVE AGENT {x}")
-
-
-def test_will_update_throws_typeerror():
-    # Note dictionary for os.environ must be string=string for key=value
-
-    to_update = dict(shanty=dict(holy="cow"))
-    with pytest.raises(TypeError):
-        with with_os_environ(to_update):
-            print("Should not reach here")
-
-    to_update = dict(bogus=35)
-    with pytest.raises(TypeError):
-        with with_os_environ(to_update):
-            print("Should not reach here")
-
-
-def test_will_update_environ():
-    to_update = dict(farthing="50")
-    with with_os_environ(to_update):
-        assert os.environ.get("farthing") == "50"
-
-    assert "farthing" not in os.environ
