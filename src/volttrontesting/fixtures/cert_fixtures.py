@@ -1,9 +1,6 @@
 import contextlib
-from cryptography.hazmat.primitives import serialization
-import os
 from types import SimpleNamespace
 
-from volttron.utils.certs import CertWrapper
 from volttron.utils.certs import Certs, _load_key
 
 # TODO: Combine cert_profile_1 and cert_profile_2
@@ -22,6 +19,9 @@ def certs_profile_1(certificate_dir, fqdn=None, num_server_certs=1, num_client_c
             ...
 
     :param certificate_dir:
+    :param fqdn
+    :param num_server_certs
+    :param num_client_certs
     :return:
     """
 
@@ -66,6 +66,9 @@ def certs_profile_2(certificate_dir, fqdn=None, num_server_certs=1, num_client_c
             ...
 
     :param certificate_dir:
+    :param fqdn
+    :param num_server_certs
+    :param num_client_certs
     :return: ns
     """
 
@@ -86,13 +89,13 @@ def certs_profile_2(certificate_dir, fqdn=None, num_server_certs=1, num_client_c
     # print(f"ca_pk: {ca_pk}")
     # print(f"ca_pk_bytes: {certs.get_pk_bytes(certs.root_ca_name)}")
     ns = dict(ca_cert=ca_cert, ca_key=ca_pk, ca_cert_file=certs.cert_file(certs.root_ca_name),
-                         ca_key_file=certs.private_key_file(certs.root_ca_name), server_certs=[], client_certs=[])
+              ca_key_file=certs.private_key_file(certs.root_ca_name), server_certs=[], client_certs=[])
 
     for x in range(num_server_certs):
         cert, key = certs.create_signed_cert_files(f"server{x}", cert_type="server", fqdn=fqdn)
 
         cert_ns = dict(key=key, cert=cert, cert_file=certs.cert_file(f"server{x}"),
-                                  key_file=certs.private_key_file(f"server{x}"))
+                       key_file=certs.private_key_file(f"server{x}"))
 
         ns['server_certs'].append(cert_ns)
 
@@ -100,7 +103,7 @@ def certs_profile_2(certificate_dir, fqdn=None, num_server_certs=1, num_client_c
 
         cert, pk1 = certs.create_signed_cert_files(f"client{x}")
         cert_ns = dict(key=pk1, cert=cert, cert_file=certs.cert_file(f"client{x}"),
-                                  key_file=certs.private_key_file(f"client{x}"))
+                       key_file=certs.private_key_file(f"client{x}"))
         ns['client_certs'].append(cert_ns)
 
     return ns
