@@ -86,6 +86,7 @@ def __execute_lifecycle_method__(identity: str,
 
 
 class TestServer:
+    __test__ = False
     __connected_agents__: Dict[str, Agent]
     __lifecycle_methods__: Dict[str, Dict[LifeCycleMembers, Callable]]
     __methods__: Dict[str, Callable]
