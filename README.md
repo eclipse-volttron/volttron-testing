@@ -1,12 +1,11 @@
 # volttron-testing
 
-[![ci](https://github.com/eclips-volttron/volttron-testing/workflows/ci/badge.svg)](https://github.com/eclipse-volttron/volttron-testing/actions?query=workflow%3Aci)
+[![ci](https://github.com/eclipse-volttron/volttron-testing/workflows/ci/badge.svg)](https://github.com/eclipse-volttron/volttron-testing/actions?query=workflow%3Aci)
 [![pypi version](https://img.shields.io/pypi/v/volttron-testing.svg)](https://pypi.org/project/volttron-testing/)
 
 ## Prerequisites
 
 * Python >= 3.8
-* Poetry (if developing)
 
 ## Installation
 
@@ -60,5 +59,5 @@ def test_send_alert():
 
 ```
 
-Reference the volttrontesting package from within your environment in order to build tests against volttrontesting.
+Reference the volttrontesting package from within your environment in order to build tests against the TestServer.
 
