@@ -11,6 +11,8 @@ import sys
 import tempfile
 import time
 import re
+
+from configparser import ConfigParser
 from contextlib import closing, contextmanager
 from subprocess import CalledProcessError
 
@@ -109,6 +111,49 @@ SUBSCRIBE_TO = RUN_DIR + '/subscribe'
 
 class PlatformWrapperError(Exception):
     pass
+
+
+# TODO: This partially duplicates functionality in volttron-core.utils.messagebus.py. These should probably be combined.
+def create_platform_config_file(message_bus, instance_name, vip_address, agent_monitor_frequency,
+                                secure_agent_users):
+    # If there is no config file or home directory yet, create volttron_home
+    # and config file
+    if not instance_name:
+        raise ValueError("Instance name should be a valid string and should "
+                         "be unique within a network of volttron instances "
+                         "that communicate with each other. start volttron "
+                         "process with '--instance-name <your instance>' if "
+                         "you are running this instance for the first time. "
+                         "Or add instance-name = <instance name> in "
+                         "vhome/config")
+
+    v_home = cc.get_volttron_home()
+    config_path = os.path.join(v_home, "config")
+    if os.path.exists(config_path):
+        config = ConfigParser()
+        config.read(config_path)
+        config.set("volttron", "message-bus", message_bus)
+        config.set("volttron", "instance-name", instance_name)
+        config.set("volttron", "vip-address", vip_address)
+        config.set("volttron", "agent-monitor-frequency", str(agent_monitor_frequency))
+        config.set("volttron", "secure-agent-users", str(secure_agent_users))
+        with open(config_path, "w") as configfile:
+            config.write(configfile)
+    else:
+        if not os.path.exists(v_home):
+            os.makedirs(v_home, 0o755)
+        config = ConfigParser()
+        config.add_section("volttron")
+        config.set("volttron", "message-bus", message_bus)
+        config.set("volttron", "instance-name", instance_name)
+        config.set("volttron", "vip-address", vip_address)
+        config.set("volttron", "agent-monitor-frequency", str(agent_monitor_frequency))
+        config.set("volttron", "secure-agent-users", str(secure_agent_users))
+
+        with open(config_path, "w") as configfile:
+            config.write(configfile)
+        # all agents need read access to config file
+        os.chmod(config_path, 0o744)
 
 
 def build_vip_address(dest_wrapper, agent):
@@ -715,9 +760,8 @@ class PlatformWrapper:
             known_hosts.add(self.opts['vip_local_address'], publickey)
             known_hosts.add(self.opts['vip_address'], publickey)
 
-            create_platform_config_file(self.volttron_home, self.vip_address, agent_monitor_frequency,
-                                        self.instance_name, self.messagebus, self.secure_agent_users)
-
+            create_platform_config_file(self.messagebus, self.instance_name, self.vip_address, agent_monitor_frequency,
+                                         self.secure_agent_users)
             if self.ssl_auth:
                 certsdir = os.path.join(self.volttron_home, 'certificates')
 
