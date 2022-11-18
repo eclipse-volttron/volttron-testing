@@ -46,4 +46,5 @@ jobs:
       - name: Add & Commit
         uses: EndBug/add-and-commit@v9.1.1
         with:
-          default_author: eclipse-volttron-bot
+          default_author: github_actor
+          # default_author: eclipse-volttron-bot
