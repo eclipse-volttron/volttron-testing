@@ -318,13 +318,6 @@ class PlatformWrapper:
         self.volttron_exe = 'volttron'
         self.python = sys.executable
 
-        # By default no web server should be started.
-        self.bind_web_address = None
-        self.discovery_address = None
-        self.jsonrpc_endpoint = None
-        self.volttron_central_address = None
-        self.volttron_central_serverkey = None
-        self.instance_name = instance_name
         self.serverkey = None
 
         # The main volttron process will be under this variable
@@ -386,12 +379,6 @@ class PlatformWrapper:
             self.skip_cleanup = self.env.get('SKIP_CLEANUP', False)
             self.server_config = ServerConfig()
 
-            self._web_admin_api = None
-
-    @property
-    def web_admin_api(self):
-        return self._web_admin_api
-
     def get_identity_keys(self, identity: str):
         with with_os_environ(self.env):
             if not Path(KeyStore.get_agent_keystore_path(identity)).exists():
@@ -433,11 +420,6 @@ class PlatformWrapper:
                 authfile.add(entry)
             except AuthFileEntryAlreadyExists:
                 pass
-
-            if self.messagebus == 'rmq' and self.bind_web_address is not None:
-                self.enable_auto_csr()
-            # if self.bind_web_address is not None:
-            #     self.web_admin_api.create_web_admin('admin', 'admin', self.messagebus)
 
     def get_agent_identity(self, agent_uuid):
         identity = None
