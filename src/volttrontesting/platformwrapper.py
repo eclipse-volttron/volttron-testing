@@ -11,6 +11,8 @@ import sys
 import tempfile
 import time
 import re
+
+from configparser import ConfigParser
 from contextlib import closing, contextmanager
 from subprocess import CalledProcessError
 
@@ -109,6 +111,49 @@ SUBSCRIBE_TO = RUN_DIR + '/subscribe'
 
 class PlatformWrapperError(Exception):
     pass
+
+
+# TODO: This partially duplicates functionality in volttron-core.utils.messagebus.py. These should probably be combined.
+def create_platform_config_file(message_bus, instance_name, vip_address, agent_monitor_frequency,
+                                secure_agent_users):
+    # If there is no config file or home directory yet, create volttron_home
+    # and config file
+    if not instance_name:
+        raise ValueError("Instance name should be a valid string and should "
+                         "be unique within a network of volttron instances "
+                         "that communicate with each other. start volttron "
+                         "process with '--instance-name <your instance>' if "
+                         "you are running this instance for the first time. "
+                         "Or add instance-name = <instance name> in "
+                         "vhome/config")
+
+    v_home = cc.get_volttron_home()
+    config_path = os.path.join(v_home, "config")
+    if os.path.exists(config_path):
+        config = ConfigParser()
+        config.read(config_path)
+        config.set("volttron", "message-bus", message_bus)
+        config.set("volttron", "instance-name", instance_name)
+        config.set("volttron", "vip-address", vip_address)
+        config.set("volttron", "agent-monitor-frequency", str(agent_monitor_frequency))
+        config.set("volttron", "secure-agent-users", str(secure_agent_users))
+        with open(config_path, "w") as configfile:
+            config.write(configfile)
+    else:
+        if not os.path.exists(v_home):
+            os.makedirs(v_home, 0o755)
+        config = ConfigParser()
+        config.add_section("volttron")
+        config.set("volttron", "message-bus", message_bus)
+        config.set("volttron", "instance-name", instance_name)
+        config.set("volttron", "vip-address", vip_address)
+        config.set("volttron", "agent-monitor-frequency", str(agent_monitor_frequency))
+        config.set("volttron", "secure-agent-users", str(secure_agent_users))
+
+        with open(config_path, "w") as configfile:
+            config.write(configfile)
+        # all agents need read access to config file
+        os.chmod(config_path, 0o744)
 
 
 def build_vip_address(dest_wrapper, agent):
@@ -298,8 +343,6 @@ class PlatformWrapper:
 
         self.services = {}
 
-        self.services = {}
-
         keystorefile = os.path.join(self.volttron_home, 'keystore')
         self.keystore = KeyStore(keystorefile)
         self.keystore.generate()
@@ -327,7 +370,8 @@ class PlatformWrapper:
             #                                                          instance_name=self.instance_name,
             #                                                          secure_agent_users=secure_agent_users)
 
-            self.certsobj = Certs(os.path.join(self.volttron_home, "certificates"))
+            Path(self.volttron_home).joinpath('certificates').mkdir(exist_ok=True)
+            self.certsobj = Certs()#Path(self.volttron_home).joinpath("certificates"))
 
             self.debug_mode = self.env.get('DEBUG_MODE', False)
             if not self.debug_mode:
@@ -353,7 +397,8 @@ class PlatformWrapper:
         for it to have any effect.  kwargs will be transferred into the service_config.yml
         file under the service_name passed.
         """
-        assert service_name in self.get_service_names(), "Only discovered services can be configured"
+        service_names = self.get_service_names()
+        assert service_name in service_names, f"Only discovered services can be configured: {service_names}."
         self.services[service_name] = {}
         self.services[service_name]["enabled"] = enabled
         self.services[service_name]["kwargs"] = kwargs
@@ -689,8 +734,6 @@ class PlatformWrapper:
                 'verboseness': logging.DEBUG,
                 'web_ca_cert': self.requests_ca_bundle
             })
-            pconfig = os.path.join(self.volttron_home, 'config')
-            config = {}
 
             # Add platform's public key to known hosts file
             publickey = self.keystore.public
@@ -699,38 +742,16 @@ class PlatformWrapper:
             known_hosts.add(self.opts['vip_local_address'], publickey)
             known_hosts.add(self.opts['vip_address'], publickey)
 
-            # Set up the configuration file based upon the passed parameters.
-            parser = configparser.ConfigParser()
-            parser.add_section('volttron')
-            parser.set('volttron', 'vip-address', vip_address)
-            if self.instance_name:
-                parser.set('volttron', 'instance-name',
-                           self.instance_name)
-            if self.messagebus:
-                parser.set('volttron', 'message-bus',
-                           self.messagebus)
-            if self.secure_agent_users:
-                parser.set('volttron', 'secure-agent-users',
-                           str(self.secure_agent_users))
-            # In python3 option values must be strings.
-            parser.set('volttron', 'agent-monitor-frequency',
-                       str(agent_monitor_frequency))
-
-            self.logit(
-                "Platform will run on message bus type {} ".format(self.messagebus))
-            self.logit("writing config to: {}".format(pconfig))
-
+            create_platform_config_file(self.messagebus, self.instance_name, self.vip_address, agent_monitor_frequency,
+                                         self.secure_agent_users)
             if self.ssl_auth:
                 certsdir = os.path.join(self.volttron_home, 'certificates')
 
                 self.certsobj = Certs(certsdir)
 
-            with open(pconfig, 'w') as cfg:
-                parser.write(cfg)
-
             if self.services:
                 with Path(self.volttron_home).joinpath("service_config.yml").open('wt') as fp:
-                    yaml.dump(fp, self.services)
+                    yaml.dump(self.services, fp)
 
             cmd = [self.volttron_exe]
             # if msgdebug:
