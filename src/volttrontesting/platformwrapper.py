@@ -190,32 +190,6 @@ def create_volttron_home() -> str:
     return volttron_home
 
 
-# TODO: remove this once it is decided how to combine functionality with store_messagebus_config.
-def create_platform_config_file(volttron_home, vip_address=None, agent_monitor_frequency=None,
-                                instance_name=None, message_bus=None, secure_agent_users=None):
-    config_path = os.path.join(volttron_home, 'config')
-    config = {}
-    # Set up the configuration file based upon the passed parameters.
-    parser = configparser.ConfigParser()
-    parser.add_section('volttron')
-    if vip_address:
-        parser.set('volttron', 'vip-address', vip_address)
-    if instance_name:
-        parser.set('volttron', 'instance-name', instance_name)
-    if message_bus:
-        parser.set('volttron', 'message-bus', message_bus)
-    if secure_agent_users:
-        parser.set('volttron', 'secure-agent-users', str(secure_agent_users))
-    if agent_monitor_frequency:
-        parser.set('volttron', 'agent-monitor-frequency', str(agent_monitor_frequency))
-    _log.debug(
-        "Platform will run on message bus type {} ".format(message_bus))
-    _log.debug("writing config to: {}".format(config_path))
-
-    with open(config_path, 'w') as cfg:
-        parser.write(cfg)
-
-
 @contextmanager
 def with_os_environ(update_env: dict):
     """
@@ -299,6 +273,13 @@ class PlatformWrapper:
         self.volttron_exe = 'volttron'
         self.python = sys.executable
 
+        # By default no web server should be started.
+        self.bind_web_address = None
+        self.discovery_address = None
+        self.jsonrpc_endpoint = None
+        self.volttron_central_address = None
+        self.volttron_central_serverkey = None
+        self.instance_name = instance_name
         self.serverkey = None
 
         # The main volttron process will be under this variable
@@ -360,6 +341,12 @@ class PlatformWrapper:
             self.skip_cleanup = self.env.get('SKIP_CLEANUP', False)
             self.server_config = ServerConfig()
 
+            self._web_admin_api = None
+
+    @property
+    def web_admin_api(self):
+        return self._web_admin_api
+
     def get_identity_keys(self, identity: str):
         with with_os_environ(self.env):
             if not Path(KeyStore.get_agent_keystore_path(identity)).exists():
@@ -401,6 +388,11 @@ class PlatformWrapper:
                 authfile.add(entry)
             except AuthFileEntryAlreadyExists:
                 pass
+
+            if self.messagebus == 'rmq' and self.bind_web_address is not None:
+                self.enable_auto_csr()
+            # if self.bind_web_address is not None:
+            #     self.web_admin_api.create_web_admin('admin', 'admin', self.messagebus)
 
     def get_agent_identity(self, agent_uuid):
         identity = None
