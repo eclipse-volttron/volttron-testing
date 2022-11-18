@@ -49,6 +49,7 @@ from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
 from volttrontesting.utils import get_rand_tcp_address, get_rand_http_address
 
 
+
 def test_will_update_throws_typeerror():
     # Note dictionary for os.environ must be string=string for key=value
 
@@ -166,6 +167,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     assert vi.is_running()
 
     # agent identity should be
+
     auuid = vi.install_agent(agent_dir="volttron-listener", start=False)
     assert auuid is not None
     time.sleep(1)
@@ -212,6 +214,7 @@ def test_reinstall_agent(volttron_instance):
     vi = volttron_instance
     assert vi is not None
     assert vi.is_running()
+
 
     auuid = vi.install_agent(agent_dir="volttron-listener", start=True, vip_identity="test_listener")
     vi = volttron_instance
@@ -278,8 +281,7 @@ def test_can_remove_agent(volttron_instance):
     assert volttron_instance.is_running()
 
     # Install ListenerAgent as the agent to be removed.
-    agent_uuid = volttron_instance.install_agent(
-        agent_dir='volttron-listener', start=False)
+    agent_uuid = volttron_instance.install_agent(agent_dir='volttron-listener', start=False)
     assert agent_uuid is not None
     started = volttron_instance.start_agent(agent_uuid)
     assert started is not None
