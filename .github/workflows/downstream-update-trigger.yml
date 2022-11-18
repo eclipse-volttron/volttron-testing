@@ -1,0 +1,49 @@
+name: Update to latest pyproject dependencies.
+
+on:
+  repository_dispatch:
+    types: [update-dependencies]
+
+jobs:
+  test-response:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Update Dependencies Triggered
+        run: |
+          echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event." 
+          echo "Event '${{ github.event.action }}' received from '${{ github.event.client_payload.repository }}'"
+          echo "Payload from downstream workflow: '${{ toJson(github.event.client_payload) }}'"
+      #----------------------------------------------
+      #       check-out repo and set-up python
+      #----------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: develop
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        id: setup-python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      #----------------------------------------------
+      #  -----  install & configure poetry  -----
+      #----------------------------------------------
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Update poetry to the latest dependencies
+        run: poetry lock && poetry update
+
+      - name: Add & Commit
+        uses: EndBug/add-and-commit@v9.1.1
+        with:
+          default_author: eclipse-volttron-bot
