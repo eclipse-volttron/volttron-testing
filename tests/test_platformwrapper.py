@@ -166,7 +166,7 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     assert vi.is_running()
 
     # agent identity should be
-    auuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a6", start=False)
+    auuid = vi.install_agent(agent_dir="volttron-listener", start=False)
     assert auuid is not None
     time.sleep(1)
     started = vi.start_agent(auuid)
@@ -213,10 +213,10 @@ def test_reinstall_agent(volttron_instance):
     assert vi is not None
     assert vi.is_running()
 
-    auuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a6", start=True, vip_identity="test_listener")
+    auuid = vi.install_agent(agent_dir="volttron-listener", start=True, vip_identity="test_listener")
     assert volttron_instance.is_agent_running(auuid)
 
-    newuuid = vi.install_agent(agent_dir="volttron-listener>=0.1.2a6", start=True, force=True,
+    newuuid = vi.install_agent(agent_dir="volttron-listener", start=True, force=True,
                                vip_identity="test_listener")
     assert vi.is_agent_running(newuuid)
     assert auuid != newuuid and auuid is not None
@@ -274,7 +274,7 @@ def test_can_remove_agent(volttron_instance):
 
     # Install ListenerAgent as the agent to be removed.
     agent_uuid = volttron_instance.install_agent(
-        agent_dir='volttron-listener>=0.1.2a6', start=False)
+        agent_dir='volttron-listener', start=False)
     assert agent_uuid is not None
     started = volttron_instance.start_agent(agent_uuid)
     assert started is not None
@@ -337,7 +337,7 @@ def test_can_install_multiple_listeners(volttron_instance):
         for x in range(num_listeners):
             identity = "listener_" + str(x)
             auuid = volttron_instance.install_agent(
-                agent_dir="volttron-listener>=0.1.2a6",
+                agent_dir="volttron-listener",
                 config_file={
                     "agentid": identity,
                     "message": "So Happpy"},
