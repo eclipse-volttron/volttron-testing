@@ -406,7 +406,7 @@ class PlatformWrapper:
     def get_service_names(self):
         """Retrieve the names of services available to configure.
         """
-        services = ServiceConfigs(Path(self.volttron_home).joinpath("service_configyml"),
+        services = ServiceConfigs(Path(self.volttron_home).joinpath("service_config.yml"),
                                   ServerConfig())
         return services.get_service_names()
 
