@@ -1280,7 +1280,7 @@ class PlatformWrapper:
             if not self.is_running():
                 return
 
-            self.dynamic_agent.vip.rpc(CONTROL, "shutdown").get()
+            self.dynamic_agent.vip.rpc(CONTROL, "shutdown").get(timeout=20)
             self.dynamic_agent.core.stop()
             if self.p_process is not None:
                 try:
