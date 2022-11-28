@@ -19,6 +19,7 @@ changelog:
     - title: Fixed Bugs 
       labels:
         - bug
+        - Bug
     - title: Other Changes
       labels:
         - "*"
