@@ -6,6 +6,7 @@
 #       - ignore-for-release
 #     authors:
 #       - octocat
+changelog:
   categories:
     - title: Breaking Changes 🛠
       labels:
