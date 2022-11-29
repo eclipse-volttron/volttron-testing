@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "volttron-testing"
-version = "0.30.0"
-description = "None"
+version = "0.4.0-rc"
+description = "The volttron-testing library contains classes and utilities for interacting with a VOLTTRON instance."
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache License 2.0"
 readme = "README.md"
@@ -24,7 +24,7 @@ pytest = "^6.2.5"
 mock = "^4.0.3"
 anypubsub = "^0.6"
 grequests = "^0.6.0"
-volttron = "^10.0.1a39"
+volttron = ">=10.0.2rc0,<11.0"
 
 [tool.poetry.group.dev.dependencies]
 # formatting, quality, tests

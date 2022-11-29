@@ -1,3 +1,27 @@
+# -*- coding: utf-8 -*- {{{
+# ===----------------------------------------------------------------------===
+#
+#                 Installable Component of Eclipse VOLTTRON
+#
+# ===----------------------------------------------------------------------===
+#
+# Copyright 2022 Battelle Memorial Institute
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# ===----------------------------------------------------------------------===
+# }}}
+
 import configparser as configparser
 import logging
 import os
@@ -406,7 +430,7 @@ class PlatformWrapper:
     def get_service_names(self):
         """Retrieve the names of services available to configure.
         """
-        services = ServiceConfigs(Path(self.volttron_home).joinpath("service_configyml"),
+        services = ServiceConfigs(Path(self.volttron_home).joinpath("service_config.yml"),
                                   ServerConfig())
         return services.get_service_names()
 
@@ -1280,7 +1304,7 @@ class PlatformWrapper:
             if not self.is_running():
                 return
 
-            self.dynamic_agent.vip.rpc(CONTROL, "shutdown").get()
+            self.dynamic_agent.vip.rpc(CONTROL, "shutdown").get(timeout=20)
             self.dynamic_agent.core.stop()
             if self.p_process is not None:
                 try:
