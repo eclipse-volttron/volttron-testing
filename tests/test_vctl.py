@@ -487,7 +487,6 @@ def test_vctl_start_stop_restart_by_tag_should_succeed(volttron_instance: Platfo
         volttron_instance.remove_all_agents()
 
 
-@pytest.mark.skip(message="issue #150")
 @pytest.mark.control
 def test_vctl_start_stop_restart_by_all_tagged_should_succeed(volttron_instance: PlatformWrapper):
     global test_agent_dir
@@ -594,7 +593,7 @@ def test_vctl_start_stop_restart_by_all_tagged_should_succeed(volttron_instance:
 
 
 @pytest.mark.parametrize("subcommand, invalid_option", [
-    #("start", "--all-taggeD"), ("stop", "--all-taggeD"), ("restart", "--all-taggeD"),
+    ("start", "--all-taggeD"), ("stop", "--all-taggeD"), ("restart", "--all-taggeD"),
     ("start", "--all"), ("stop", "--all"), ("restart", "--all")
 ]
                          )
@@ -605,7 +604,6 @@ def test_vctl_start_stop_restart_should_raise_error_on_invalid_options(volttron_
             execute_command(["vctl", subcommand, invalid_option], volttron_instance.env)
 
 
-@pytest.mark.skip(message="issue #150")
 @pytest.mark.parametrize("subcommand, valid_option",
                          [("start", "--all-tagged"), ("stop", "--all-tagged"), ("restart", "--all-tagged")])
 def test_vctl_start_stop_restart_all_tagged_when_no_agents_are_installed(volttron_instance: PlatformWrapper,
