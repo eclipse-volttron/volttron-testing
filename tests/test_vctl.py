@@ -611,3 +611,102 @@ def test_vctl_start_stop_restart_all_tagged_when_no_agents_are_installed(volttro
     with with_os_environ(volttron_instance.env):
         execute_command(["vctl", subcommand, valid_option], volttron_instance.env)
         assert not jsonapi.loads(execute_command(["vctl", "--json", "status"], volttron_instance.env))
+
+
+@pytest.mark.parametrize("subcommand", [("enable",),
+                                        ("enable", "-p", "10"),
+                                        ("disable",)])
+def test_vctl_enable_disable_success(volttron_instance: PlatformWrapper, subcommand):
+    global test_agent_dir
+    with with_os_environ(volttron_instance.env):
+        install_results = []
+        if subcommand[0] == "disable":
+            result_prefix = "Disabling"
+            result_suffix = ""
+            result_dict_key = "disabled"
+        else:
+            if len(subcommand) == 1:
+                priority = '50'
+            else:
+                priority = subcommand[2]
+            result_prefix = "Enabling"
+            result_suffix = "with priority " + priority
+            result_dict_key = "enabled"
+
+        for n in [1, 2]:
+            install_agent = [
+                "volttron-ctl",
+                "--json",
+                "install",
+                test_agent_dir,
+                "--tag",
+                f"tag_{n}",
+                "--vip-identity",
+                f"id_{n}"
+            ]
+            install_results.append(jsonapi.loads(execute_command(install_agent, volttron_instance.env)))
+        install_agent = [
+            "volttron-ctl",
+            "--json",
+            "install",
+            test_agent_dir
+        ]
+        install_results.append(execute_command(install_agent, volttron_instance.env))
+
+        # test enable/disable
+        command = ["vctl"]
+        command.extend(subcommand)
+        command.extend([install_results[0]["agent_uuid"]])
+        # test with agent uuid
+        out1 = execute_command(command, volttron_instance.env).splitlines()
+        assert len(out1) == 1
+        assert out1[0].startswith(f"{result_prefix}")
+        if result_suffix:
+            assert out1[0].endswith(result_suffix)
+
+        # repeat for the same uuid. Should not throw any error
+        out2 = execute_command(command, volttron_instance.env).splitlines()
+        assert out1 == out2
+
+        # if disable try disabling what is not enabled
+        if subcommand[0] == "disable":
+            command = ["vctl"]
+            command.extend(subcommand)
+            command.extend([install_results[1]["agent_uuid"]])
+            # test with agent uuid
+            out = execute_command(command, volttron_instance.env).splitlines()
+            assert len(out) == 1
+            assert out[0].startswith(f"{result_prefix}")
+
+        # test with tag and --json format
+        command = ["vctl", "--json"]
+        command.extend(subcommand)
+        command.extend(["--tag",  "tag_1", "tag_2"])
+        out_dict = jsonapi.loads(execute_command(command, volttron_instance.env))
+        print(out_dict)
+        assert len(out_dict) == 2
+        assert out_dict[0][result_dict_key] and out_dict[1][result_dict_key]
+        if subcommand[0] == "enable":
+            assert out_dict[0]["priority"] == out_dict[1]["priority"] == priority
+
+        # # test with id and --json format
+        command = ["vctl", "--json"]
+        command.extend(subcommand)
+        command.extend([install_results[0]["agent_uuid"], install_results[1]["agent_uuid"]])
+        out_dict = jsonapi.loads(execute_command(command, volttron_instance.env))
+        assert len(out_dict) == 2
+        assert out_dict[0][result_dict_key] and out_dict[1][result_dict_key]
+        if subcommand[0] == "enable":
+            assert out_dict[0]["priority"] == out_dict[1]["priority"] == priority
+
+        # test with --name testagent-0.1.0
+        command = ["vctl", "--json"]
+        command.extend(subcommand)
+        command.extend(["--name", "testagent-0.1.0"])
+        out_dict = jsonapi.loads(execute_command(command, volttron_instance.env))
+        assert len(out_dict) == 3
+        assert out_dict[0][result_dict_key] and out_dict[1][result_dict_key] and out_dict[2][result_dict_key]
+        if subcommand == "enable":
+            assert out_dict[0]["priority"] == out_dict[1]["priority"] == out_dict[2]["priority"] == priority
+
+        volttron_instance.remove_all_agents()
