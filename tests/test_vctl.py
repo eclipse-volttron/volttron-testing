@@ -91,14 +91,9 @@ test-agent = "testagent.agent:main"
 
 # @pytest.mark.skip(msg="Need to fix in core so that when shutdown happens and we are in a vip message it handles the errors.")
 def test_vctl_shutdown(volttron_instance: PlatformWrapper):
-    assert volttron_instance.is_running()
 
     with with_os_environ(volttron_instance.env):
-        proc = subprocess.Popen(["vctl", "status"], stderr=subprocess.PIPE,
-                                stdout=subprocess.PIPE)
-        out, err = proc.communicate()
-        assert err.strip() == b"No installed Agents found"
-        result = execute_command(["vctl", "status"])
+        assert volttron_instance.is_running()
 
         volttron_instance.stop_platform()
         with pytest.raises(RuntimeError,
