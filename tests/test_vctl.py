@@ -76,7 +76,7 @@ authors = ["VOLTTRON Team"]
 
 [tool.poetry.dependencies]
 python = ">=3.8,<4.0"
-volttron = ">=10.0.2rc0,<11.0"
+volttron = ">=10.0.3a9,<11.0"
 
 [tool.poetry.scripts]
 test-agent = "testagent.agent:main"
