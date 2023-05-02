@@ -75,7 +75,7 @@ description = "test agent to test vctl commands"
 authors = ["VOLTTRON Team"]
 
 [tool.poetry.dependencies]
-python = ">=3.8,<4.0"
+python = ">=3.10,<4.0"
 volttron = ">=10.0.3a9,<11.0"
 
 [tool.poetry.scripts]
