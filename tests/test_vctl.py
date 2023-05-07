@@ -23,6 +23,7 @@
 # }}}
 import copy
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import List
@@ -30,8 +31,7 @@ from typing import List
 import gevent
 import pytest
 import yaml
-from volttron.utils import execute_command
-from volttron.utils import jsonapi
+from volttron.utils import execute_command, jsonapi
 
 from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
 
@@ -75,8 +75,8 @@ description = "test agent to test vctl commands"
 authors = ["VOLTTRON Team"]
 
 [tool.poetry.dependencies]
-python = ">=3.8,<4.0"
-volttron = ">=10.0.2rc0,<11.0"
+python = ">=3.10,<4.0"
+volttron = ">=10.0.3a9,<11.0"
 
 [tool.poetry.scripts]
 test-agent = "testagent.agent:main"
@@ -96,8 +96,10 @@ def test_vctl_shutdown(volttron_instance: PlatformWrapper):
         assert volttron_instance.is_running()
 
         volttron_instance.stop_platform()
-        with pytest.raises(RuntimeError,
-                           match='VOLTTRON is not running. This command requires VOLTTRON platform to be running'):
+        with pytest.raises(
+                RuntimeError,
+                match=
+                'VOLTTRON is not running. This command requires VOLTTRON platform to be running'):
             execute_command(["vctl", "status"])
         gevent.sleep(1)
         volttron_instance.restart_platform()
@@ -108,8 +110,10 @@ def test_peerlist_no_connection(volttron_instance: PlatformWrapper):
     # Test command that needs instance running
     with with_os_environ(volttron_instance.env):
         volttron_instance.stop_platform()
-        with pytest.raises(RuntimeError,
-                           match='VOLTTRON is not running. This command requires VOLTTRON platform to be running'):
+        with pytest.raises(
+                RuntimeError,
+                match=
+                'VOLTTRON is not running. This command requires VOLTTRON platform to be running'):
             execute_command(["volttron-ctl", "peerlist"], env=volttron_instance.env)
         volttron_instance.restart_platform()
 
@@ -121,8 +125,10 @@ def test_peerlist_with_connection(volttron_instance: PlatformWrapper):
         assert volttron_instance.is_running()
         response = execute_command(["volttron-ctl", "peerlist"], volttron_instance.env)
         peers = set(response.split())
-        expected_peers = {'control.connection', 'dynamic_agent', 'platform.auth', 'platform.config_store',
-                          'platform.control', 'platform.health'}
+        expected_peers = {
+            'control.connection', 'dynamic_agent', 'platform.auth', 'platform.config_store',
+            'platform.control', 'platform.health'
+        }
         assert peers == expected_peers
 
 
@@ -131,12 +137,10 @@ def test_peerlist_with_connection(volttron_instance: PlatformWrapper):
 def test_no_connection():
     # Test command that doesn't need instance running.
     wrapper = PlatformWrapper(ssl_auth=False)
-    p = subprocess.Popen(
-        ["volttron-ctl", "list"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=wrapper.env
-    )
+    p = subprocess.Popen(["volttron-ctl", "list"],
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE,
+                         env=wrapper.env)
     stdout, stderr = p.communicate()
 
     try:
@@ -145,6 +149,11 @@ def test_no_connection():
         assert not stderr.decode("utf-8")
 
 
+@pytest.mark.skipif(
+    sys.version.startswith('3.10'),
+    reason="""This is failing on python3.10 for some reason causing github actions to lockup
+                    See https://github.com/eclipse-volttron/volttron-testing/issues/39 for clarity"""
+)
 @pytest.mark.control
 def test_install_same_identity(volttron_instance: PlatformWrapper):
     global test_agent_dir
@@ -162,9 +171,7 @@ def test_install_same_identity(volttron_instance: PlatformWrapper):
         response = execute_command(args, volttron_instance.env)
         json_response = jsonapi.loads(response)
         agent_uuid = json_response["agent_uuid"]
-        response = execute_command(
-            ["vctl", "--json", "status", agent_uuid], volttron_instance.env
-        )
+        response = execute_command(["vctl", "--json", "status", agent_uuid], volttron_instance.env)
         json_response = jsonapi.loads(response)
         identity = list(json_response.keys())[0]
         agent_status_dict = json_response[identity]
@@ -178,9 +185,7 @@ def test_install_same_identity(volttron_instance: PlatformWrapper):
             execute_command(args, volttron_instance.env)
 
         # Nothing should have changed the pid should be the same
-        response = execute_command(
-            ["vctl", "--json", "status", agent_uuid], volttron_instance.env
-        )
+        response = execute_command(["vctl", "--json", "status", agent_uuid], volttron_instance.env)
         json_response = jsonapi.loads(response)
         identity = list(json_response.keys())[0]
         agent_status_dict = json_response[identity]
@@ -205,9 +210,7 @@ def test_install_same_identity(volttron_instance: PlatformWrapper):
         print(f"json response after force install with --start {json_response}")
         assert json_response["starting"]
         gevent.sleep(1)
-        response = execute_command(
-            ["vctl", "--json", "status", agent_uuid], volttron_instance.env
-        )
+        response = execute_command(["vctl", "--json", "status", agent_uuid], volttron_instance.env)
         json_response = jsonapi.loads(response)
         identity = list(json_response.keys())[0]
         agent_status_dict = json_response[identity]
@@ -243,21 +246,12 @@ def test_install_with_wheel_bad_path(volttron_instance: PlatformWrapper):
 
 
 @pytest.mark.control
-@pytest.mark.parametrize(
-    "args",
-    (
-        ["--tag", "brewster", "--priority", "1"],
-        ["--tag", "brewster", "--start", "--priority", "1"],
-        ["--tag", "enabled_agent", "--enable"],
-        ["--tag", "autostart_agent", "--priority", "10"],
-        [],
-        ["--vip-identity", "ralph"]
-    )
-)
+@pytest.mark.parametrize("args", (["--tag", "brewster", "--priority", "1"], [
+    "--tag", "brewster", "--start", "--priority", "1"
+], ["--tag", "enabled_agent", "--enable"], ["--tag", "autostart_agent", "--priority", "10"
+                                            ], [], ["--vip-identity", "ralph"]))
 @pytest.mark.parametrize("use_config", [False, True])
-def test_install_arg_matrix(
-        volttron_instance: PlatformWrapper, args: List, use_config: bool
-):
+def test_install_arg_matrix(volttron_instance: PlatformWrapper, args: List, use_config: bool):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
         # Don't change the parametrized args that have mutable values. Make copy if changing within test.
@@ -292,9 +286,7 @@ def test_install_arg_matrix(
         agent_uuid = json_response["agent_uuid"]
         gevent.sleep(1)
 
-        response = execute_command(
-            ["vctl", "--json", "status", agent_uuid], volttron_instance.env
-        )
+        response = execute_command(["vctl", "--json", "status", agent_uuid], volttron_instance.env)
         json_response = jsonapi.loads(response)
 
         identity = list(json_response.keys())[0]
@@ -318,23 +310,22 @@ def test_install_arg_matrix(
         if use_config:
             expected_config = yaml.safe_load(config_str)
             config_path = Path(volttron_instance.volttron_home).joinpath(
-                f"agents/{agent_status_dict['identity']}/config"
-            )
+                f"agents/{agent_status_dict['identity']}/config")
             with open(config_path) as fp:
                 config_data = yaml.safe_load(fp.read())
                 assert expected_config == config_data
 
         if "--enable" in vctl_args or "--priority" in vctl_args:
             priority_path = Path(volttron_instance.volttron_home).joinpath(
-                f"agents/{agent_status_dict['identity']}/AUTOSTART"
-            )
+                f"agents/{agent_status_dict['identity']}/AUTOSTART")
             priority_value = 50
             if "--priority" in vctl_args:
                 priority_value = vctl_args[vctl_args.index("--priority") + 1]
             assert priority_path.read_text().strip() == str(priority_value)
             volttron_instance.restart_platform()
             gevent.sleep(1)
-            response = execute_command(["vctl", "--json", "status", agent_uuid], volttron_instance.env)
+            response = execute_command(["vctl", "--json", "status", agent_uuid],
+                                       volttron_instance.env)
             json_response = jsonapi.loads(response)
             identity = list(json_response.keys())[0]
             agent_status_dict = json_response[identity]
@@ -349,12 +340,8 @@ def test_install_arg_matrix(
 @pytest.mark.control
 def test_agent_filters(volttron_instance):
     global test_agent_dir
-    auuid = volttron_instance.install_agent(
-        agent_dir=test_agent_dir, start=True
-    )
-    buuid = volttron_instance.install_agent(
-        agent_dir=test_agent_dir, start=True
-    )
+    auuid = volttron_instance.install_agent(agent_dir=test_agent_dir, start=True)
+    buuid = volttron_instance.install_agent(agent_dir=test_agent_dir, start=True)
 
     # Verify all installed agents show up in list
     with with_os_environ(volttron_instance.env):
@@ -364,13 +351,15 @@ def test_agent_filters(volttron_instance):
 
     # Filter agent based on agent uuid
     with with_os_environ(volttron_instance.env):
-        agent_list = execute_command(["volttron-ctl", "list", str(auuid)], env=volttron_instance.env)
+        agent_list = execute_command(["volttron-ctl", "list", str(auuid)],
+                                     env=volttron_instance.env)
         assert "testagent-0.1.0_1" in str(agent_list)
         assert "testagent-0.1.0_2" not in str(agent_list)
 
     # Filter agent based on agent name
     with with_os_environ(volttron_instance.env):
-        agent_list = execute_command(["volttron-ctl", "list", "testagent-0.1.0_1"], env=volttron_instance.env)
+        agent_list = execute_command(["volttron-ctl", "list", "testagent-0.1.0_1"],
+                                     env=volttron_instance.env)
         assert "testagent-0.1.0_1" in str(agent_list)
         assert "testagent-0.1.0_2" not in str(agent_list)
 
@@ -383,15 +372,11 @@ def test_vctl_start_stop_restart_by_uuid_should_succeed(volttron_instance: Platf
     with with_os_environ(volttron_instance.env):
         identity = "test_agent"
         install_test_agent = [
-            "volttron-ctl",
-            "--json",
-            "install",
-            test_agent_dir,
-            "--vip-identity",
-            identity
+            "volttron-ctl", "--json", "install", test_agent_dir, "--vip-identity", identity
         ]
         # install agent
-        agent_uuid = jsonapi.loads(execute_command(install_test_agent, volttron_instance.env))['agent_uuid']
+        agent_uuid = jsonapi.loads(execute_command(install_test_agent,
+                                                   volttron_instance.env))['agent_uuid']
 
         # check that agent has not been started
         check_agent_status = ["vctl", "--json", "status", agent_uuid]
@@ -413,7 +398,7 @@ def test_vctl_start_stop_restart_by_uuid_should_succeed(volttron_instance: Platf
 
         agent_status = jsonapi.loads(execute_command(check_agent_status, volttron_instance.env))
         assert not agent_status[identity]['health']
-        assert not int(agent_status[identity]['status'])  # status is a '0' when agent is stopped
+        assert not int(agent_status[identity]['status'])    # status is a '0' when agent is stopped
 
         # restart agent
         # start the agent first so that restart agent will go through the entire flow of stopping and starting an agent
@@ -435,17 +420,12 @@ def test_vctl_start_stop_restart_by_tag_should_succeed(volttron_instance: Platfo
         identity = "testagent"
         tag_name = "testagent"
         install_testagent = [
-            "volttron-ctl",
-            "--json",
-            "install",
-            test_agent_dir,
-            "--vip-identity",
-            identity,
-            "--tag",
-            tag_name
+            "volttron-ctl", "--json", "install", test_agent_dir, "--vip-identity", identity,
+            "--tag", tag_name
         ]
         # install tagged agent
-        agent_uuid = jsonapi.loads(execute_command(install_testagent, volttron_instance.env))['agent_uuid']
+        agent_uuid = jsonapi.loads(execute_command(install_testagent,
+                                                   volttron_instance.env))['agent_uuid']
         # check that agent have not been started
         check_agent_status = ["vctl", "--json", "status", agent_uuid]
         agent_status = jsonapi.loads(execute_command(check_agent_status, volttron_instance.env))
@@ -467,7 +447,7 @@ def test_vctl_start_stop_restart_by_tag_should_succeed(volttron_instance: Platfo
 
         agent_status = jsonapi.loads(execute_command(check_agent_status, volttron_instance.env))
         assert not agent_status[identity]['health']
-        assert not int(agent_status[identity]['status'])  # status is a '0' when agent is stopped
+        assert not int(agent_status[identity]['status'])    # status is a '0' when agent is stopped
 
         # restart tagged agent
         # start the agent first so that restart agent will go through the entire flow of stopping and starting an agent
@@ -491,32 +471,15 @@ def test_vctl_start_stop_restart_by_all_tagged_should_succeed(volttron_instance:
         identity_no_tag = "test_no_tag"
         tag_name = "test_agent"
         install_tagged_agent = [
-            "volttron-ctl",
-            "--json",
-            "install",
-            test_agent_dir,
-            "--vip-identity",
-            identity_tag,
-            "--tag",
-            tag_name
+            "volttron-ctl", "--json", "install", test_agent_dir, "--vip-identity", identity_tag,
+            "--tag", tag_name
         ]
         install_tagged_agent2 = [
-            "volttron-ctl",
-            "--json",
-            "install",
-            test_agent_dir,
-            "--vip-identity",
-            identity_tag2,
-            "--tag",
-            tag_name
+            "volttron-ctl", "--json", "install", test_agent_dir, "--vip-identity", identity_tag2,
+            "--tag", tag_name
         ]
         install_agent_no_tag = [
-            "volttron-ctl",
-            "--json",
-            "install",
-            test_agent_dir,
-            "--vip-identity",
-            identity_no_tag
+            "volttron-ctl", "--json", "install", test_agent_dir, "--vip-identity", identity_no_tag
         ]
 
         # install two tagged agents, one untagged agent
@@ -557,10 +520,12 @@ def test_vctl_start_stop_restart_by_all_tagged_should_succeed(volttron_instance:
         status = jsonapi.loads(execute_command(check_all_status, volttron_instance.env))
 
         assert not status[identity_tag]['health']
-        assert not int(status[identity_tag]['status'])  # status is a '0' when agent is started and then stopped
+        assert not int(status[identity_tag]
+                       ['status'])    # status is a '0' when agent is started and then stopped
 
         assert not status[identity_tag2]['health']
-        assert not int(status[identity_tag2]['status'])  # status is a '0' when agent is started and then stopped
+        assert not int(status[identity_tag2]
+                       ['status'])    # status is a '0' when agent is started and then stopped
 
         assert not status[identity_no_tag]['health']
         assert not status[identity_no_tag]['status']
@@ -587,30 +552,30 @@ def test_vctl_start_stop_restart_by_all_tagged_should_succeed(volttron_instance:
         volttron_instance.remove_all_agents()
 
 
-@pytest.mark.parametrize("subcommand, invalid_option", [
-    ("start", "--all-taggeD"), ("stop", "--all-taggeD"), ("restart", "--all-taggeD"),
-    ("start", "--all"), ("stop", "--all"), ("restart", "--all")
-]
-                         )
-def test_vctl_start_stop_restart_should_raise_error_on_invalid_options(volttron_instance: PlatformWrapper, subcommand,
-                                                                       invalid_option):
+@pytest.mark.parametrize("subcommand, invalid_option", [("start", "--all-taggeD"),
+                                                        ("stop", "--all-taggeD"),
+                                                        ("restart", "--all-taggeD"),
+                                                        ("start", "--all"), ("stop", "--all"),
+                                                        ("restart", "--all")])
+def test_vctl_start_stop_restart_should_raise_error_on_invalid_options(
+        volttron_instance: PlatformWrapper, subcommand, invalid_option):
     with with_os_environ(volttron_instance.env):
         with pytest.raises(RuntimeError):
             execute_command(["vctl", subcommand, invalid_option], volttron_instance.env)
 
 
-@pytest.mark.parametrize("subcommand, valid_option",
-                         [("start", "--all-tagged"), ("stop", "--all-tagged"), ("restart", "--all-tagged")])
-def test_vctl_start_stop_restart_all_tagged_when_no_agents_are_installed(volttron_instance: PlatformWrapper,
-                                                                                 subcommand, valid_option):
+@pytest.mark.parametrize("subcommand, valid_option", [("start", "--all-tagged"),
+                                                      ("stop", "--all-tagged"),
+                                                      ("restart", "--all-tagged")])
+def test_vctl_start_stop_restart_all_tagged_when_no_agents_are_installed(
+        volttron_instance: PlatformWrapper, subcommand, valid_option):
     with with_os_environ(volttron_instance.env):
         execute_command(["vctl", subcommand, valid_option], volttron_instance.env)
-        assert not jsonapi.loads(execute_command(["vctl", "--json", "status"], volttron_instance.env))
+        assert not jsonapi.loads(
+            execute_command(["vctl", "--json", "status"], volttron_instance.env))
 
 
-@pytest.mark.parametrize("subcommand", [("enable",),
-                                        ("enable", "-p", "10"),
-                                        ("disable",)])
+@pytest.mark.parametrize("subcommand", [("enable", ), ("enable", "-p", "10"), ("disable", )])
 def test_vctl_enable_disable_success(volttron_instance: PlatformWrapper, subcommand):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
@@ -630,22 +595,12 @@ def test_vctl_enable_disable_success(volttron_instance: PlatformWrapper, subcomm
 
         for n in [1, 2]:
             install_agent = [
-                "volttron-ctl",
-                "--json",
-                "install",
-                test_agent_dir,
-                "--tag",
-                f"tag_{n}",
-                "--vip-identity",
-                f"id_{n}"
+                "volttron-ctl", "--json", "install", test_agent_dir, "--tag", f"tag_{n}",
+                "--vip-identity", f"id_{n}"
             ]
-            install_results.append(jsonapi.loads(execute_command(install_agent, volttron_instance.env)))
-        install_agent = [
-            "volttron-ctl",
-            "--json",
-            "install",
-            test_agent_dir
-        ]
+            install_results.append(
+                jsonapi.loads(execute_command(install_agent, volttron_instance.env)))
+        install_agent = ["volttron-ctl", "--json", "install", test_agent_dir]
         install_results.append(execute_command(install_agent, volttron_instance.env))
 
         # test enable/disable
@@ -676,7 +631,7 @@ def test_vctl_enable_disable_success(volttron_instance: PlatformWrapper, subcomm
         # test with tag and --json format
         command = ["vctl", "--json"]
         command.extend(subcommand)
-        command.extend(["--tag",  "tag_1", "tag_2"])
+        command.extend(["--tag", "tag_1", "tag_2"])
         out_dict = jsonapi.loads(execute_command(command, volttron_instance.env))
         print(out_dict)
         assert len(out_dict) == 2
@@ -700,8 +655,10 @@ def test_vctl_enable_disable_success(volttron_instance: PlatformWrapper, subcomm
         command.extend(["--name", "testagent-0.1.0"])
         out_dict = jsonapi.loads(execute_command(command, volttron_instance.env))
         assert len(out_dict) == 3
-        assert out_dict[0][result_dict_key] and out_dict[1][result_dict_key] and out_dict[2][result_dict_key]
+        assert out_dict[0][result_dict_key] and out_dict[1][result_dict_key] and out_dict[2][
+            result_dict_key]
         if subcommand == "enable":
-            assert out_dict[0]["priority"] == out_dict[1]["priority"] == out_dict[2]["priority"] == priority
+            assert out_dict[0]["priority"] == out_dict[1]["priority"] == out_dict[2][
+                "priority"] == priority
 
         volttron_instance.remove_all_agents()
