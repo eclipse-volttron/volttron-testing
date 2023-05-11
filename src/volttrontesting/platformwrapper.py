@@ -1305,7 +1305,7 @@ class PlatformWrapper:
                 return
 
             self.dynamic_agent.vip.rpc(CONTROL, "shutdown").get(timeout=20)
-            self.dynamic_agent.core.stop()
+            self.dynamic_agent.core.stop(timeout=20)
             if self.p_process is not None:
                 try:
                     gevent.sleep(0.2)
@@ -1371,7 +1371,7 @@ class PlatformWrapper:
                 try:
                     # don't wait indefinitely as shutdown will not throw an error if RMQ is down/has cert errors
                     self.dynamic_agent.vip.rpc(CONTROL, 'shutdown').get(timeout=10)
-                    self.dynamic_agent.core.stop()
+                    self.dynamic_agent.core.stop(timeout=10)
                 except gevent.Timeout:
                     self.logit("Timeout shutting down platform")
                 self.dynamic_agent = None
