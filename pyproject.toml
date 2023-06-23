@@ -24,7 +24,7 @@ pytest = "^6.2.5"
 mock = "^4.0.3"
 anypubsub = "^0.6"
 grequests = "^0.6.0"
-volttron = ">=10.0.3a9,<11.0"
+#volttron = ">=10.0.3a9,<11.0"
 docker = "^6.0.1"
 pytest-timeout = "^2.1.0"
 
@@ -39,6 +39,7 @@ mypy = "^0.942"
 coverage = "^6.3.2"
 Sphinx = "^4.5.0"
 sphinx-rtd-theme = "^1.0.0"
+volttron = {path = "../volttron-core", develop = true}
 
 [tool.yapfignore]
 ignore_patterns = [
