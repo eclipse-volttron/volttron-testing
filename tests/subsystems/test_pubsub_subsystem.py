@@ -36,7 +36,6 @@ class _publish_from_handler_test_agent(Agent):
         self.subscription_results = {}
 
 
-
 @pytest.mark.pubsub
 def test_publish_from_message_handler(volttron_instance):
     """ Tests the ability to change a status by sending a different status
@@ -131,9 +130,8 @@ class TestAgent(Agent):
         self.subscription_results = dict()
         self.instance_subscription_results = dict()
 
-    @PubSub.subscribe_by_tags('pubsub', 'condition_devices', all_platforms=True)
+    @PubSub.subscribe_by_tags('pubsub', 'condition_test_class_method')
     def on_match(self, peer, sender, bus, topic, headers, message):
-        print("on_match")
         self.subscription_results[topic] = {'headers': headers,
                                             'message': message}
 
@@ -197,7 +195,8 @@ def test_subscribe_by_tags_instance_method(volttron_instance, test_agents):
             mock_tag_method.return_value = ["devices/campus/b2/d2"]
 
             # Subscribe to subscribe_by_tags instance method and check result
-            agent.vip.pubsub.subscribe_by_tags('pubsub', "condition_devices/campus/b2/d2", agent.callback_method)
+            agent.vip.pubsub.subscribe_by_tags('pubsub', "condition_devices/campus/b2/d2",
+                                               agent.callback_method).get(timeout=10)
 
             # Publish messages
             pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b1/device_test_class_method/all", headers,
@@ -224,8 +223,8 @@ def test_subscribe_by_tags_refresh_tags(volttron_instance, test_agents):
             mock_tag_method.return_value = ["devices/campus/b2/d2"]
 
             # Subscribe to subscribe_by_tags instance method and check result
-            agent.vip.pubsub.subscribe_by_tags('pubsub', "condition_devices/campus/b2", agent.callback_method)
-            gevent.sleep(0.5)
+            agent.vip.pubsub.subscribe_by_tags('pubsub', "condition_devices/campus/b2",
+                                               agent.callback_method).get(timeout=5)
             # Publish messages
             pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d2/all", headers, all_message).get(timeout=10)
             gevent.sleep(0.5)
@@ -250,54 +249,68 @@ def test_subscribe_by_tags_refresh_tags(volttron_instance, test_agents):
         test_agent.reset_results()
         agent.core.stop()
 
-#
-# def test_unsubscribe_by_tags(volttron_instance, test_agents):
-#     pub_agent, agent = test_agents
-#     try:
-#         with mock.patch.object(PubSub, "get_topics_by_tag") as mock_tag_method:
-#             mock_tag_method.return_value = ["devices/campus/b2/d3"]
-#
-#             # Subscribe to subscribe_by_tags instance method and check result
-#             agent.vip.pubsub.subscribe_by_tags('pubsub', "condition_devices/campus/b2/d3",
-#                                                agent.callback_method).get(timeout=5)
-#             # Publish messages
-#             pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d3/all", headers, all_message).get(timeout=10)
-#
-#             assert agent.instance_subscription_results["devices/campus/b2/d3/all"]["headers"] == headers
-#             assert agent.instance_subscription_results["devices/campus/b2/d3/all"]["message"] == all_message
-#             agent.reset_results()
-#
-#             # Unsubscribe and check result
-#             agent.vip.pubsub.unsubscribe_by_tags('pubsub', "condition_devices/campus/b2/d3",
-#                                                  agent.callback_method).get(timeout=5)
-#             pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d3/all", headers, all_message).get(timeout=10)
-#             assert agent.instance_subscription_results.get("devices/campus/b2/d3/all") is None
-#     finally:
-#         agent.reset_results()
-#
-#
-# def test_publish_by_tags(volttron_instance, test_agents):
-#     pub_agent, agent = test_agents
-#     try:
-#         with mock.patch.object(PubSub, "get_topics_by_tag") as mock_tag_method:
-#             mock_tag_method.return_value = ["devices/campus/b2/d4/p1", "devices/campus/b2/d4/p2"]
-#
-#             # Subscribe by prefix
-#             agent.vip.pubsub.subscribe('pubsub', 'devices/campus/b2/d4/p1', agent.callback_method).get(timeout=5)
-#
-#             agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points",
-#                                              headers, [75.2, {"units": "F"}]).get(timeout=5)
-#
-#
-#             assert agent.instance_subscription_results["devices/campus/b2/d2/all"]["headers"] == headers
-#             assert agent.instance_subscription_results["devices/campus/b2/d2/all"]["message"] == all_message
-#             agent.reset_results()
-#
-#             # Unsubscribe and check result
-#             agent.vip.pubsub.unsubscribe_by_tags('pubsub', "condition_devices/campus/b2/d2", agent.callback_method)
-#             gevent.sleep(0.5)
-#             pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d2/all", headers, all_message).get(timeout=10)
-#             gevent.sleep(2)  # just to make sure we waited long enough
-#             assert agent.instance_subscription_results.get("devices/campus/b2/d2/all") is None
-#     finally:
-#         agent.reset_results()
+
+def test_unsubscribe_by_tags(volttron_instance, test_agents):
+    pub_agent, agent = test_agents
+    try:
+        with mock.patch.object(PubSub, "get_topics_by_tag") as mock_tag_method:
+            mock_tag_method.return_value = ["devices/campus/b2/d3"]
+
+            # Subscribe to subscribe_by_tags instance method and check result
+            agent.vip.pubsub.subscribe_by_tags('pubsub', "condition_devices/campus/b2/d3",
+                                               agent.callback_method).get(timeout=5)
+            # Publish messages
+            pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d3/all", headers, all_message).get(timeout=10)
+
+            assert agent.instance_subscription_results["devices/campus/b2/d3/all"]["headers"] == headers
+            assert agent.instance_subscription_results["devices/campus/b2/d3/all"]["message"] == all_message
+            agent.reset_results()
+
+            # Unsubscribe and check result
+            agent.vip.pubsub.unsubscribe_by_tags('pubsub', "condition_devices/campus/b2/d3",
+                                                 agent.callback_method).get(timeout=5)
+            pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d3/all", headers, all_message).get(timeout=10)
+            gevent.sleep(2)
+            assert agent.instance_subscription_results.get("devices/campus/b2/d3/all") is None
+    finally:
+        agent.reset_results()
+
+
+def test_publish_by_tags(volttron_instance, test_agents):
+    pub_agent, agent = test_agents
+    try:
+        with mock.patch.object(PubSub, "get_topics_by_tag") as mock_tag_method:
+            mock_tag_method.return_value = ["devices/campus/b2/d4/p1"]
+
+            # Subscribe by prefix
+            agent.vip.pubsub.subscribe('pubsub', 'devices/campus/b2/d4/p1', agent.callback_method).get(timeout=5)
+
+            # publish by tags. should publish to two topics returned by mock method
+            agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points",
+                                             headers, [75.2, {"units": "F"}])
+            gevent.sleep(0.5)
+            assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["headers"] == headers
+            assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["message"] == [75.2, {"units": "F"}]
+            agent.reset_results()
+
+            mock_tag_method.return_value = ["devices/campus/b2/d4/p1", "devices/campus/b2/d4/p2"]
+
+            # Unsubscribe and check result
+            agent.vip.pubsub.subscribe_by_tags('pubsub', "tag_condition_device_d4_points",
+                                               agent.callback_method).get(timeout=5)
+            try:
+                agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points",
+                                                 headers, [75.2, {"units": "F"}])
+            except ValueError as v:
+                assert v.args[0] == "tag condition tag_condition_device_d4_points matched multiple topics " \
+                                    "(['devices/campus/b2/d4/p1', 'devices/campus/b2/d4/p2']) but " \
+                                    "publish_multiple is set to false"
+            agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points",
+                                             headers, [75.2, {"units": "F"}], publish_multiple=True)
+            gevent.sleep(1)
+            assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["headers"] == headers
+            assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["message"] == [75.2, {"units": "F"}]
+            assert agent.instance_subscription_results["devices/campus/b2/d4/p2"]["headers"] == headers
+            assert agent.instance_subscription_results["devices/campus/b2/d4/p2"]["message"] == [75.2, {"units": "F"}]
+    finally:
+        agent.reset_results()
