@@ -1068,7 +1068,12 @@ class PlatformWrapper:
             disconnected = False
             timer_start = time.time()
             while not disconnected:
-                peers = self.dynamic_agent.vip.peerlist().get(timeout=20)
+                try:
+                    peers = self.dynamic_agent.vip.peerlist().get(timeout=10)
+                except gevent.Timeout:
+                    self.logit("peerlist call timed out. Exiting loop. "
+                               "Not waiting for control connection to exit.")
+                    break
                 disconnected = CONTROL_CONNECTION not in peers
                 if disconnected:
                     break
