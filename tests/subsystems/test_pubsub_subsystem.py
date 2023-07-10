@@ -5,6 +5,7 @@ import gevent
 import pytest
 from mock import MagicMock, patch
 
+
 from volttron.client.messaging import headers as headers_mod
 from volttron.client.vip.agent import Agent
 from volttron.client.vip.agent import PubSub
