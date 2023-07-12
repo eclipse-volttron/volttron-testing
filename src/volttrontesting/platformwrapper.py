@@ -1068,7 +1068,12 @@ class PlatformWrapper:
             disconnected = False
             timer_start = time.time()
             while not disconnected:
-                peers = self.dynamic_agent.vip.peerlist().get(timeout=20)
+                try:
+                    peers = self.dynamic_agent.vip.peerlist().get(timeout=10)
+                except gevent.Timeout:
+                    self.logit("peerlist call timed out. Exiting loop. "
+                               "Not waiting for control connection to exit.")
+                    break
                 disconnected = CONTROL_CONNECTION not in peers
                 if disconnected:
                     break
@@ -1351,7 +1356,7 @@ class PlatformWrapper:
                 return
 
             if not self.is_running():
-                self.logit(f"Instance not running {self.is_running()} and skip cleanup: {self.skip_cleanup}")
+                self.logit(f"Instance running {self.is_running()} and skip cleanup: {self.skip_cleanup}")
                 if not self.skip_cleanup:
                     self.__remove_home_directory__()
                 return
@@ -1367,6 +1372,10 @@ class PlatformWrapper:
                         self.remove_all_agents()
                 except gevent.Timeout:
                     self.logit("Timeout getting list of agents")
+                except RuntimeError as e:
+                    if not self.is_running():
+                        self.logit("Unable to shutdown agent. instance is already shutdown")
+                    self.logit(f"Error shutting down agent {e}")
 
                 try:
                     # don't wait indefinitely as shutdown will not throw an error if RMQ is down/has cert errors
