@@ -323,12 +323,12 @@ def test_publish_by_tags(volttron_instance, test_agents):
                 agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points", "",
                                                  headers=headers, message=[75.2, {"units": "F"}])
             except ValueError as v:
-                assert v.args[0] == "tag condition tag_condition_device_d4_points matched multiple topics " \
-                                    "(['devices/campus/b2/d4/p1', 'devices/campus/b2/d4/p2']) but " \
-                                    "publish_multiple is set to false"
+
+                assert v.args[0] == 'tag condition tag_condition_device_d4_points matched 2 topics but ' \
+                                    'max_publish_count is set to 1'
             # explicitly sending topic_source as empty as mock get_topics_by_tag is returning with "devices" prefix
             agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points", "",
-                                             headers=headers, message=[75.2, {"units": "F"}], publish_multiple=True)
+                                             headers=headers, message=[75.2, {"units": "F"}], max_publish_count=2)
             gevent.sleep(1)
             assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["headers"] == headers
             assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["message"] == [75.2, {"units": "F"}]
