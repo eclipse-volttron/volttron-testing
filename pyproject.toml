@@ -24,8 +24,8 @@ pytest = "^6.2.5"
 mock = "^4.0.3"
 anypubsub = "^0.6"
 grequests = "^0.6.0"
-volttron = ">=10.0.3a9,<11.0"
-#volttron = { path="../volttron-core", develop = true}
+#volttron = ">=10.0.3a9,<11.0"
+volttron-core = { path="../volttron-core", develop = true}
 
 docker = "^6.0.1"
 pytest-timeout = "^2.1.0"
