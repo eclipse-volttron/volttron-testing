@@ -46,32 +46,19 @@ import grequests
 import yaml
 
 from volttron.types.server_config import ServiceConfigs, ServerConfig
-from volttron.utils.keystore import encode_key, decode_key
-from volttrontesting.fixtures.cert_fixtures import certs_profile_2
-# from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
-# from volttron.platform import packaging
+
+from volttron.client import Agent
 from volttron.utils import jsonapi, strip_comments, store_message_bus_config, execute_command
 from volttron.client.known_identities import PLATFORM_WEB, CONTROL, CONTROL_CONNECTION, PROCESS_IDENTITIES
 from volttron.utils.certs import Certs
 from volttron.utils.commands import wait_for_volttron_startup, is_volttron_running
-from volttron.utils.logs import setup_logging
-from volttron.server.aip import AIPplatform
-from volttron.services.auth import (AuthFile, AuthEntry,
-                                    AuthFileEntryAlreadyExists)
-from volttron.utils.keystore import KeyStore, KnownHostsStore
-from volttron.client.vip.agent import Agent
-from volttron.client.vip.agent.connection import Connection
 from volttrontesting.utils import get_rand_vip, get_hostname_and_random_port, \
     get_rand_ip_and_port, get_rand_tcp_address
-# from volttrontesting.fixtures.rmq_test_setup import create_rmq_volttron_setup
-# from volttron.utils.rmq_setup import start_rabbit, stop_rabbit
-# from volttron.utils.rmq_setup import setup_rabbitmq_volttron
-
 from volttron.utils.context import ClientContext as cc
 
-setup_logging()
+
 _log = logging.getLogger(__name__)
 
 RESTRICTED_AVAILABLE = False
@@ -317,8 +304,6 @@ class PlatformWrapper:
         path = os.environ['PATH']
         if bin_dir not in path:
             path = bin_dir + ":" + path
-        if VOLTTRON_ROOT not in path:
-            path = VOLTTRON_ROOT + ":" + path
         # in the context of this platform it is very important not to
         # use the main os.environ for anything.
         self.env = {
@@ -333,16 +318,12 @@ class PlatformWrapper:
             'LANG': "en_US.UTF-8",
             'LC_ALL': "en_US.UTF-8",
             'PYTHONDONTWRITEBYTECODE': '1',
-            'VOLTTRON_ROOT': VOLTTRON_ROOT,
             'HTTPS_PROXY': os.environ.get('HTTPS_PROXY', ''),
             'https_proxy': os.environ.get('https_proxy', '')
         }
-        self.volttron_root = VOLTTRON_ROOT
         self.vctl_exe = 'volttron-ctl'
         self.volttron_exe = 'volttron'
         self.python = sys.executable
-
-        self.serverkey = None
 
         # The main volttron process will be under this variable
         # after startup_platform happens.
