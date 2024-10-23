@@ -1105,8 +1105,6 @@ class PlatformWrapper:
             disconnected = False
             timer_start = time.time()
             while not disconnected:
-                peers = self.dynamic_agent.vip.peerlist().get(timeout=10)
-                print(f"Peers: {peers}")
                 try:
                     peers = self.dynamic_agent.vip.peerlist().get(timeout=10)
 
