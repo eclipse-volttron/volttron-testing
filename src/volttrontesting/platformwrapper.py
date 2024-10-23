@@ -887,7 +887,6 @@ class PlatformWrapper:
 
             self.logit("VOLTTRON_HOME SETTING: {}".format(
                 self.env['VOLTTRON_HOME']))
-            env = self.env.copy()
 
             cmd = f"vctl --json install {wheel_file}".split()
             #cmd = ['volttron-ctl', '--json', 'install', wheel_file]
