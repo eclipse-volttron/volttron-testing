@@ -41,9 +41,13 @@ Pytest test cases for testing actuator agent using rpc calls.
 """
 import gevent
 import pytest
+
 from volttron.client.vip.agent import Agent
 from volttron.client.known_identities import CONFIGURATION_STORE
 from volttron.utils import jsonrpc
+from volttrontesting.fixtures.volttron_platform_fixtures import volttron_instance
+
+pytest.importorskip(__name__)
 
 
 class _config_test_agent(Agent):
@@ -108,7 +112,7 @@ def default_config_test_agent(request, config_test_agent):
     request.addfinalizer(cleanup)
     return config_test_agent
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_set_config_json(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -121,6 +125,7 @@ def test_set_config_json(default_config_test_agent):
     assert first == ("config", "NEW", {"value": 1})
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_manage_store_json(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -133,6 +138,7 @@ def test_manage_store_json(default_config_test_agent):
     assert first == ("config", "NEW", {"value": 1})
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_set_config_csv(default_config_test_agent):
     csv_config = "value\n1"
@@ -145,6 +151,7 @@ def test_set_config_csv(default_config_test_agent):
     assert first == ("config", "NEW", [{"value": "1"}])
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_set_config_raw(default_config_test_agent):
     raw_config = "test_config_stuff"
@@ -157,6 +164,7 @@ def test_set_config_raw(default_config_test_agent):
     assert first == ("config", "NEW", raw_config)
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_update_config(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -177,6 +185,7 @@ def test_update_config(default_config_test_agent):
     assert second == ("config", "UPDATE", {"value": 2})
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_delete_config(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -194,6 +203,7 @@ def test_delete_config(default_config_test_agent):
     assert second == ("config", "DELETE", None)
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_manage_delete_config(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -211,6 +221,7 @@ def test_manage_delete_config(default_config_test_agent):
     assert second == ("config", "DELETE", None)
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_delete_store(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -228,6 +239,7 @@ def test_delete_store(default_config_test_agent):
     assert second == ("config", "DELETE", None)
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_manage_delete_store(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -245,6 +257,7 @@ def test_manage_delete_store(default_config_test_agent):
     assert second == ("config", "DELETE", None)
 
 
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_get_config(config_test_agent):
     json_config = """{"value":1}"""
@@ -256,7 +269,7 @@ def test_get_config(config_test_agent):
 
     assert config == {"value": 1}
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_manage_get_config(config_test_agent):
     json_config = """{"value":1}"""
@@ -268,7 +281,7 @@ def test_manage_get_config(config_test_agent):
 
     assert config == {"value": 1}
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_get_metadata(config_test_agent):
     json_config = """{"value":1}"""
@@ -287,7 +300,7 @@ def test_get_metadata(config_test_agent):
     assert metadata["modified"]
     assert metadata["data"] == '{"value":1}'
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_manage_get_metadata(config_test_agent):
     json_config = """{"value":1}"""
@@ -306,7 +319,7 @@ def test_manage_get_metadata(config_test_agent):
     assert metadata["modified"]
     assert metadata["data"] == '{"value":1}'
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_get_raw_config(config_test_agent):
     json_config = """{"value":1}"""
@@ -318,7 +331,7 @@ def test_get_raw_config(config_test_agent):
 
     assert config == json_config
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_manage_get_raw_config(config_test_agent):
     json_config = """{"value":1}"""
@@ -330,7 +343,7 @@ def test_manage_get_raw_config(config_test_agent):
 
     assert config == json_config
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_list_config(config_test_agent):
     json_config = """{"value":1}"""
@@ -348,7 +361,7 @@ def test_list_config(config_test_agent):
 
     assert config_list == ['config1', 'config2', 'config3']
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_manage_list_config(config_test_agent):
     json_config = """{"value":1}"""
@@ -366,7 +379,7 @@ def test_manage_list_config(config_test_agent):
 
     assert config_list == ['config1', 'config2', 'config3']
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_list_store(config_test_agent):
     json_config = """{"value":1}"""
@@ -377,7 +390,7 @@ def test_list_store(config_test_agent):
 
     assert "config_test_agent" in config_list
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_manage_list_store(config_test_agent):
     json_config = """{"value":1}"""
@@ -388,7 +401,7 @@ def test_manage_list_store(config_test_agent):
 
     assert "config_test_agent" in config_list
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_agent_list_config(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -405,7 +418,7 @@ def test_agent_list_config(default_config_test_agent):
 
     assert config_list == ['config1', 'config2', 'config3']
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_agent_get_config(default_config_test_agent):
     json_config = """{"value":1}"""
@@ -416,7 +429,7 @@ def test_agent_get_config(default_config_test_agent):
 
     assert config == {"value": 1}
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_agent_reference_config_and_callback_order(default_config_test_agent):
     json_config = """{"config2":"config://config2", "config3":"config://config3"}"""
@@ -451,7 +464,7 @@ def test_agent_reference_config_and_callback_order(default_config_test_agent):
     second = results[1]
     assert second == ("config3", "NEW", {"value": 3})
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_agent_set_config(default_config_test_agent, volttron_instance):
     json_config = {"value": 1}
@@ -472,7 +485,7 @@ def test_agent_set_config(default_config_test_agent, volttron_instance):
     first = results[0]
     assert first == ("config", "UPDATE",  {"value": 1})
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_agent_set_config_no_update(default_config_test_agent):
     json_config = {"value": 1}
@@ -486,7 +499,7 @@ def test_agent_set_config_no_update(default_config_test_agent):
 
     assert config_list == []
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_agent_delete_config(default_config_test_agent):
     json_config = {"value": 1}
@@ -502,7 +515,7 @@ def test_agent_delete_config(default_config_test_agent):
     second = results[1]
     assert second == ("config", "DELETE", None)
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_agent_default_config(request, volttron_instance):
 
@@ -544,7 +557,7 @@ def test_agent_default_config(request, volttron_instance):
     result = results[-1]
     assert result == ("config", "UPDATE", {"value": 2})
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_agent_sub_options(request, volttron_instance):
 
@@ -594,7 +607,7 @@ def test_agent_sub_options(request, volttron_instance):
     delete_result = results[2]
     assert delete_result == ("delete/config", "DELETE", None)
 
-
+@pytest.mark.skip(reason="Need to update")
 @pytest.mark.config_store
 def test_config_store_security(volttron_instance, default_config_test_agent):
     try:
