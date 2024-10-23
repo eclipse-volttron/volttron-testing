@@ -39,9 +39,10 @@ def test_instantiate():
 
 
 def test_agent_subscription_and_logging():
-    an_agent = Agent(identity="foo")
+
     ts = TestServer()
     assert ts
+    an_agent = ts.instantiate_agent(Agent)
 
     log = logging.getLogger("an_agent_logger")
     ts.connect_agent(an_agent, log)

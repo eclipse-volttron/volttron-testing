@@ -30,13 +30,23 @@ import inspect
 from enum import Enum
 import re
 from logging import Logger
-from typing import Dict, Callable, Any, Tuple, List, Optional
+import random
+from typing import Dict, Callable, Any, Tuple, List, Optional, TypeVar
 
 from gevent.event import AsyncResult
+from volttron.client.decorators import core_builder, connection_builder
+from volttron.types import Credentials, Connection, AgentContext, CoreLoop
+from volttron.types.agent_context import AgentOptions
+
+# Need to use full path to ABC class here.
+from volttron.types.factories import CoreBuilder, ConnectionBuilder
 
 from volttrontesting.memory_pubsub import MemoryPubSub, MemorySubscriber, PublishedMessage
+from volttrontesting.platformwrapper import create_volttron_home, with_os_environ
 
 from volttron.client import Agent
+
+AgentT = type(Agent)
 
 
 @dataclass
@@ -108,6 +118,98 @@ def __execute_lifecycle_method__(identity: str,
     print(resp)
     return ServerResponse(identity, fn.__name__, resp)
 
+class CoreLoopTest(CoreLoop):
+    def __init__(self, **kwargs):
+        print(kwargs)
+
+    def loop(self, running_event):
+        pass
+
+class CoreBuilderForTesting(CoreBuilder):
+    def build(self, *, context: AgentContext, owner: Agent = None) -> CoreLoop:
+        class MyLoop(CoreLoop):
+            def __init__(self, context: AgentContext, owner: Agent = None):
+                self._context = context
+
+            class Eventing:
+                def connect(self, method, obj=None):
+                    print(f"Connect called method: {method} object {obj}")
+
+            @property
+            def identity(self) -> str:
+                return self._context.credentials.identity
+
+            def connection(self) -> Connection:
+                return
+
+            def version(self) -> str:
+                return
+
+            def loop(self, running_event):
+                print("Looping")
+
+            def register(self, subsystem: str, handle_subsystem: Callable, handle_error: Callable):
+                print("Registering subsystem")
+
+            @property
+            def configuration(self):
+                return MyLoop.Eventing()
+
+            @property
+            def onsetup(self):
+                return MyLoop.Eventing()
+
+            @property
+            def ondisconnected(self):
+                return MyLoop.Eventing()
+
+            @property
+            def onconnected(self):
+                return MyLoop.Eventing()
+
+            @property
+            def onstart(self):
+                return MyLoop.Eventing()
+
+            def setup(self):
+                print("Doing Setup now!")
+
+            def schedule(self, deadline, func, *args, **kwargs):
+                print(f"Scheduling: {deadline} with function {func}")
+
+        return MyLoop(context=context)
+
+class ConnectionBuilderForTesting(ConnectionBuilder):
+    def build(self, *, credentials: Credentials) -> Connection:
+        class MyConnection(Connection):
+            @property
+            @abstractmethod
+            def connected(self) -> bool:
+                ...
+
+            @abstractmethod
+            def connect(self):
+                ...
+
+            @abstractmethod
+            def disconnect(self):
+                ...
+
+            @abstractmethod
+            def is_connected(self) -> bool:
+                ...
+
+            @abstractmethod
+            def send_vip_message(self, message: Message):
+                ...
+
+            @abstractmethod
+            def receive_vip_message(self) -> Message:
+                ...
+        return MyConnection(credentials=credentials)
+
+connection_builder(ConnectionBuilderForTesting, name="test_connection")
+
 
 class TestServer:
     __test__ = False
@@ -116,6 +218,7 @@ class TestServer:
     __methods__: Dict[str, Callable]
     __server_pubsub__: MemoryPubSub
     __pubsub_wrappers__: Dict[str, PubSubWrapper]
+    __volttron_home__: str
 
     def __new__(cls, *args, **kwargs):
         TestServer.__connected_agents__ = {}
@@ -124,10 +227,18 @@ class TestServer:
         TestServer.__pubsub_wrappers__ = {}
         TestServer.__server_pubsub__ = MemoryPubSub()
         TestServer.__server_log__ = ServerLogWrapper()
+        TestServer.__volttron_home__ = create_volttron_home()
+        core_builder(CoreBuilderForTesting, name="test_builder")
         return super(TestServer, cls).__new__(cls)
 
     def __init__(self):
+        from volttron.server.server_options import ServerOptions
+        from pathlib import Path
+
         self._subscribers: List[MemorySubscriber] = []
+        self._options = ServerOptions(volttron_home=Path(self.__volttron_home__), auth_enabled=False)
+        with with_os_environ({'VOLTTRON_HOME': self._options.volttron_home.as_posix()}):
+            self._options.store()
 
     @property
     def config(self) -> ServerConfig:
@@ -136,6 +247,21 @@ class TestServer:
     @config.setter
     def config(self, config: ServerConfig):
         self._config = config
+
+    def instantiate_agent(self, agent_cls: AgentT = Agent, config_path: StrPath = None, identity: str = None,
+                          agent_options: AgentOptions=None):
+
+        if identity is None:
+            identity = agent_cls.__name__ + str(random.randint(0, 5000))
+
+        with with_os_environ({"AGENT_VIP_IDENTITY": identity}):
+            agent = agent_cls(config_path=config_path,
+                              credentials=Credentials(identity=identity),
+                              agent_options=agent_options)
+            assert agent.core is not None
+
+        print("Launching")
+        return agent
 
     def _trigger_dispatch(self):
         for s in self.__pubsub_wrappers__.values():

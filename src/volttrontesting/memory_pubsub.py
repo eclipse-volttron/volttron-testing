@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from queue import Queue
 from typing import List, Optional, Dict, Any, Callable, Pattern, AnyStr
@@ -89,7 +90,22 @@ class MemoryPubSub:
                     sub.received_messages().append(PublishedMessage(topic=topic,
                                                                     headers=headers, message=message, bus=bus))
                     if sub.callback:
-                        sub.callback(topic, headers, message, bus)
+                        sig = inspect.signature(sub.callback)
+                        kwargs = {}
+                        for s, v in sig.parameters.items():
+                            kwargs[s] = None
+
+                        kwargs['topic'] = topic
+                        kwargs['headers'] = headers
+                        kwargs['message'] = message
+                        if 'peer' in kwargs:
+                            kwargs['peer'] = 'pubsub'
+                        if 'sender' in kwargs:
+                            kwargs['sender'] = 'me'
+                        if 'bus' in kwargs:
+                            kwargs['bus'] = bus
+                        sub.callback(**kwargs)
+                        #sub.callback(topic=topic, message=message, headers=headers, peer='pubsub', sender='', bus='')
         return self
 
     def subscribe(self, prefix: str, callback: Optional[Callable] = None) -> MemorySubscriber:
