@@ -480,7 +480,7 @@ class PlatformWrapper:
             raise NotImplemented("Local path library is available yet.")
 
         if version != "latest":
-            cmd = f"poetry add {library}==version"
+            cmd = f"poetry add {library}=={version}"
         else:
             cmd = f"poetry add {library}@latest"
 
