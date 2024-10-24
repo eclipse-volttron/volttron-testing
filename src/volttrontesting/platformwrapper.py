@@ -282,6 +282,10 @@ class PlatformWrapper:
              'PATH': f":{self._venv.as_posix()}/bin:" + os.environ.get("PATH", "")
         }
 
+        # Allow debug override of skip_cleanup parameter.
+        if 'DEBUG' in os.environ:
+            self._skip_cleanup = True
+
         if environment_updates is not None:
             if not isinstance(environment_updates, dict):
                 raise ValueError(f"environmental_update must be: dict[str, str] not type {type(environment_updates)}")
