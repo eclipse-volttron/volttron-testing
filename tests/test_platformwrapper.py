@@ -153,7 +153,7 @@ def test_install_agent_from_github(volttron_instance):
         vi.stop_agent(agent_uuid=agent_uuid)
         assert not vi.is_agent_running(agent_uuid)
         vi.start_agent(agent_uuid)
-        assert vi.is_agent_running()
+        assert vi.is_agent_running(agent_uuid)
         current_pid = vi.agent_pid(agent_uuid)
         vi.restart_agent(agent_uuid)
         new_pid = vi.agent_pid(agent_uuid)
