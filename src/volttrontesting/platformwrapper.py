@@ -222,16 +222,21 @@ class InstallAgentOptions:
 DefaultAgentInstallOptions = InstallAgentOptions()
 
 class PlatformWrapper:
-    def __init__(self, options: ServerOptions, project_toml_file: Path | str,  start_platform: bool = True,
-                 skip_cleanup: bool = False, environment_updates: dict[str, str] = None):
+    def __init__(self, options: ServerOptions, project_toml_file: Path | str, start_platform: bool = True,
+                 skip_cleanup: bool = False, environment_updates: dict[str, str] = None, enable_sys_queue: bool = False):
         """
         Initializes a new VOLTTRON instance
 
         Creates a temporary VOLTTRON_HOME directory with a packaged directory for agents that are built.
 
-        :options: ServerOptions - The environment that the platform will run under.
-        :project_toml_file: Path - The pyproject.toml file to use as a base for this platform wrapper and it's environment.
-        :start_platform: bool - Should the platform be started before returning from this constructor
+        :options: The environment that the platform will run under.
+        :project_toml_file: The pyproject.toml file to use as a base for this platform wrapper and it's environment.
+        :start_platform: Should the platform be started before returning from this constructor
+        :skip_cleanup: Should the environment not be cleaned up (even when cleanup method is called)
+        :environment_updates: A dictionary of environmental variables to use during execution.  Will be merged with
+            existing variables so these will overwrite if there is a collision.
+        :enable_sys_queue: Should stdout be intercepted to be analysed by calls to pop_stdout_queue method
+
         """
 
         # We need to use the toml file as a template for executing the proper environment of the
@@ -291,6 +296,7 @@ class PlatformWrapper:
         self._dynamic_agent: Agent | None = None
         self._dynamic_agent_task: Greenlet | None = None
 
+        self._enable_sys_queue = enable_sys_queue
         self._stdout_queue = Queue()
         self._stdout_thread: threading.Thread | None = None
 
@@ -319,12 +325,18 @@ class PlatformWrapper:
         return self._dynamic_agent
 
     def pop_stdout_queue(self) -> str:
+        if not self._enable_sys_queue:
+            raise ValueError(f"SysQueue not enabled, pass True to PlatformWrapper constructor for enable_sys_queue "
+                             f"argument.")
         try:
             yield self._stdout_queue.get_nowait()
         except queue.Empty:
             raise StopIteration()
 
     def clear_stdout_queue(self):
+        if not self._enable_sys_queue:
+            raise ValueError(f"SysQueue not enabled, pass True to PlatformWrapper constructor for enable_sys_queue "
+                             f"argument.")
         try:
             while True:
                 self._stdout_queue.get_nowait()
@@ -698,12 +710,13 @@ class PlatformWrapper:
                                            text=True)
             time.sleep(1)
 
-            # Set up a background thread to gather queue
-            self._stdout_thread = threading.Thread(target=capture_stdout,
-                                                   args=(self._stdout_queue, self._platform_process),
-                                                   daemon=True)
-            self._stdout_thread.start()
-            gevent.sleep(0.1)
+            if self._enable_sys_queue:
+                # Set up a background thread to gather queue
+                self._stdout_thread = threading.Thread(target=capture_stdout,
+                                                       args=(self._stdout_queue, self._platform_process),
+                                                       daemon=True)
+                self._stdout_thread.start()
+                gevent.sleep(0.1)
 
             # A None value means that the process is still running.
             # A negative means that the process exited with an error.
@@ -978,6 +991,7 @@ class PlatformWrapper:
 
         This function will return with a uuid of the installed agent.
 
+        :param start:
         :param agent_wheel:
         :param agent_dir:
         :param install_options: The options available for installing an agent on the platform.

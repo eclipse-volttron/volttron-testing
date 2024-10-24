@@ -31,6 +31,36 @@ from volttrontesting.fixtures import get_pyproject_toml
 from pathlib import Path
 
 
+def test_can_enable_sys_queue(get_pyproject_toml):
+    options = create_server_options()
+
+    p = PlatformWrapper(options=options, project_toml_file=get_pyproject_toml, enable_sys_queue=True)
+
+    for data in p.pop_stdout_queue():
+        assert data
+        p.shutdown_platform()
+
+    p.cleanup()
+
+
+def test_value_error_raised_sys_queue(get_pyproject_toml):
+    options = create_server_options()
+
+    p = PlatformWrapper(options=options, project_toml_file=get_pyproject_toml)
+
+    with pytest.raises(ValueError):
+        for data in p.pop_stdout_queue():
+            pass
+
+    with pytest.raises(ValueError):
+        for data in p.clear_stdout_queue():
+            pass
+
+    p.shutdown_platform()
+
+    p.cleanup()
+
+
 def test_install_library(get_pyproject_toml):
     options = create_server_options()
 

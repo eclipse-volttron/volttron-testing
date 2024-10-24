@@ -31,7 +31,7 @@ from random import randint
 from random import random
 
 import gevent
-import mock
+from unittest import mock
 import pytest
 
 from volttron.utils import format_timestamp
