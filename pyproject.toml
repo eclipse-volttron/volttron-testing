@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "volttron-testing"
-version = "0.4.1rc1"
+version = "0.5.0rc0"
 description = "The volttron-testing library contains classes and utilities for interacting with a VOLTTRON instance."
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache License 2.0"
@@ -25,8 +25,8 @@ anypubsub = "^0.6"
 
 # This will bring in volttron-core, lib-zmq and lib-auth by default
 #volttron = "^11.0.0rc0"
-
-volttron-core = { path="../volttron-core", develop = true}
+volttron-core = "^2.0.0rc3"
+#volttron-core = { path="../volttron-core", develop = true}
 
 docker = "^7.1.0"
 pytest-timeout = "^2.3.1"
@@ -40,8 +40,10 @@ pytest-virtualenv = "^1.8.0"
 # are bringing those libraries in as dependencies.
 #
 # If local use these libraries or use lib-auth and lib-zmq
-volttron-lib-auth = {path="../volttron-lib-auth", develop=true}
-volttron-lib-zmq = {path="../volttron-lib-zmq", develop=true}
+#volttron-lib-auth = {path="../volttron-lib-auth", develop=true}
+#volttron-lib-zmq = {path="../volttron-lib-zmq", develop=true}
+volttron-lib-auth = "^2.0.0rc1"
+volttron-lib-zmq = "^2.0.0.rc4"
 
 
 [tool.yapfignore]
