@@ -112,12 +112,12 @@ def volttron_instance(request, get_pyproject_toml: Path, **kwargs):
     @return: volttron platform instance
     """
     # had module for memory_pubsub so remove it so the lookup is correct for other message buses.
-    remove_modules: list[str] = ['volttrontesting.server_mock']
-    had_module: list[str] = []
-    for mod in remove_modules:
-        if mod in sys.modules:
-            sys.modules.pop(mod)
-            had_module.append(mod)
+    # remove_modules: list[str] = ['volttrontesting.server_mock']
+    # had_module: list[str] = []
+    # for mod in remove_modules:
+    #     if mod in sys.modules:
+    #         sys.modules.pop(mod)
+    #         had_module.append(mod)
     options = create_server_options()
     options.auth_enabled = request.param['auth_enabled']
 
@@ -127,10 +127,10 @@ def volttron_instance(request, get_pyproject_toml: Path, **kwargs):
     print(f"Shutting down {p}")
     p.shutdown_platform()
     p.cleanup()
-    for mod in had_module:
-        importlib.import_module(mod)
-        if mod in sys.modules:
-            sys.modules.pop(mod)
+    # for mod in had_module:
+    #     importlib.import_module(mod)
+    #     if mod in sys.modules:
+    #         sys.modules.pop(mod)
 
 
 # Use this fixture to get more than 1 volttron instance for test.

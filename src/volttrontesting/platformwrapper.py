@@ -298,7 +298,8 @@ class PlatformWrapper:
         # Every instance comes with a dynamic_agent that will help to do
         # platform level things.
         self._dynamic_agent: Agent | None = None
-        self._dynamic_agent_task: Greenlet | None = None
+        #self._dynamic_agent_task: Greenlet | None = None
+        self._built_agent_tasks: list[Greenlet] = []
 
         self._enable_sys_queue = enable_sys_queue
         self._stdout_queue = Queue()
@@ -322,9 +323,10 @@ class PlatformWrapper:
         if self._dynamic_agent is None:
             # This is done so the dynamic agent can connect to the bus.
             # self._create_credentials(identity="dynamic")
-            agent, task = self.build_agent(identity="dynamic")
+            agent = self.build_agent(identity="dynamic")
             self._dynamic_agent = agent
-            self._dynamic_agent_task = task
+            # self._built_agent_tasks.append(task)
+            # self._dynamic_agent_task = task
 
         return self._dynamic_agent
 
@@ -448,7 +450,7 @@ class PlatformWrapper:
     #
     #         return conn
 
-    def build_agent(self, identity: Identity, agent_class: AgentT = Agent, options: AgentOptions = None) -> [Agent, Greenlet]:
+    def build_agent(self, identity: Identity, agent_class: AgentT = Agent, options: AgentOptions = None) -> Agent:
         """
         Build an agent with a connection to the current platform.
 
@@ -486,8 +488,9 @@ class PlatformWrapper:
                 run = agent.core.run
             task = gevent.spawn(run)
             gevent.sleep(1)
+            self._built_agent_tasks.append(task)
 
-            return agent, task
+            return agent
 
     def install_library(self, library: str | Path, version: str = "latest"):
 
@@ -612,6 +615,9 @@ class PlatformWrapper:
 
         toml_obj = tomli.loads((self._server_options.volttron_home / "pyproject.toml").read_text())
 
+        # First change the package name so we can install the package without an error
+        toml_obj['tool']['poetry']['name'] = "testing-" + toml_obj['tool']['poetry']['name']
+
         if 'readme' in toml_obj['tool']['poetry']:
             cwd = os.getcwd()
             os.chdir(self._project_toml_file.parent)
@@ -637,9 +643,10 @@ class PlatformWrapper:
                 dep_path = Path(value['path']).resolve().absolute()
                 toml_obj['tool']['poetry']['dependencies'][dep]['path'] = dep_path.as_posix()
                 os.chdir(cwd)
-
+        has_groups: list[str] = []
         if 'group' in toml_obj['tool']['poetry']:
             for group in toml_obj['tool']['poetry']['group']:
+                has_groups.append(group)
                 dependencies = toml_obj['tool']['poetry']['group'][group]['dependencies']
                 for dep, value in dependencies.items():
                     if 'path' in value:
@@ -651,6 +658,9 @@ class PlatformWrapper:
         tomli_w.dump(toml_obj, self._home_toml_file.open("wb"))
 
         cmd = f"poetry install".split()
+        if has_groups:
+            cmd.extend(["--with", ",".join(has_groups)])
+
         try:
             output = self._virtual_env.run(args=cmd, capture=True, cwd=self.volttron_home)
         except CalledProcessError as e:
@@ -1057,7 +1067,11 @@ class PlatformWrapper:
                     cmd.extend(["--start"])
 
                 self.logit(f"Command installation is: {cmd}")
-                output = self._virtual_env.run(args=cmd, env=self._platform_environment, capture=True)
+                try:
+                    output = self._virtual_env.run(args=cmd, env=self._platform_environment, capture=True)
+                except CalledProcessError as e:
+                    self.logit(e.output)
+                    raise
 
                 # stdout = execute_command(cmd, logger=_log, env=self.env,
                 #                          err_prefix="Error installing agent")
@@ -1405,6 +1419,7 @@ class PlatformWrapper:
             raise ValueError("Cannot cleanup until after shutdown.")
 
         if self._skip_cleanup:
+            self.logit("Skipping cleanup")
             return
 
         shutil.rmtree(self.volttron_home, ignore_errors=True)
@@ -1450,6 +1465,9 @@ class PlatformWrapper:
                 except gevent.Timeout:
                     self.logit("Timeout shutting down platform")
                 self._dynamic_agent = None
+
+            for g in self._built_agent_tasks:
+                g.kill()
 
             if self._platform_process is not None:
                 try:

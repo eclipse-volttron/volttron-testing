@@ -208,7 +208,7 @@ class ConnectionBuilderForTesting(ConnectionBuilder):
                 ...
         return MyConnection(credentials=credentials)
 
-connection_builder(ConnectionBuilderForTesting, name="test_connection")
+
 
 
 class TestServer:
@@ -228,6 +228,7 @@ class TestServer:
         TestServer.__server_pubsub__ = MemoryPubSub()
         TestServer.__server_log__ = ServerLogWrapper()
         TestServer.__volttron_home__ = create_volttron_home()
+        connection_builder(ConnectionBuilderForTesting, name="test_connection")
         core_builder(CoreBuilderForTesting, name="test_builder")
         return super(TestServer, cls).__new__(cls)
 
