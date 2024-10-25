@@ -33,11 +33,12 @@ from volttrontesting import TestClient, TestServer
 def test_send_alert():
     """ Test that an agent can send an alert through the pubsub message bus."""
 
+    ts = TestServer()
+
     # Create an agent to run the test with
-    agent = Agent(identity='test-health')
+    agent = ts.instantiate_agent(identity='test-health')
 
     # Create the server and connect the agent with the server
-    ts = TestServer()
     ts.connect_agent(agent=agent)
 
     # The health.send_alert should send a pubsub message through the message bus
