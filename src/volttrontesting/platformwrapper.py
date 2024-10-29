@@ -520,13 +520,23 @@ class PlatformWrapper:
     def install_library(self, library: str | Path, version: str = "latest"):
 
         if isinstance(library, Path):
-            # Install locally could be a wheel or a pyproject.toml project
-            raise NotImplemented("Local path library is available yet.")
-
-        if version != "latest":
-            cmd = f"poetry add {library}=={version}"
+            library = library.resolve()  # Ensure we have an absolute path
+            if library.is_file() and library.suffix == ".whl":
+                # Install the wheel file directly
+                cmd = f"poetry add {library}"
+            elif library.is_dir() and (library / "pyproject.toml").exists():
+                # Install from a directory with pyproject.toml
+                cmd = f"poetry add {library}"
+            elif library.is_dir() and (library / "setup.py").exists():
+                # Install from a directory with setup.py (legacy support)
+                cmd = f"poetry add {library}"
+            else:
+                raise ValueError("The specified path is not a valid wheel file or project directory.")
         else:
-            cmd = f"poetry add {library}@latest"
+            if version != "latest":
+                cmd = f"poetry add {library}=={version}"
+            else:
+                cmd = f"poetry add {library}@latest"
 
         try:
             output = self._virtual_env.run(args=cmd, env=self._platform_environment, capture=True,
