@@ -31,6 +31,25 @@ from volttrontesting.fixtures import get_pyproject_toml
 from pathlib import Path
 
 
+def test_run_command(get_pyproject_toml):
+    p = None
+    try:
+        options = create_server_options()
+
+        p = PlatformWrapper(options=options, project_toml_file=get_pyproject_toml)
+        cmd = 'ls -la'.split()
+        output = p.run_command(cmd=cmd).split("\n")
+
+        try:
+            next(filter(lambda a: a.find("config") > 0, output))
+        except StopIteration:
+            pytest.fail("Couldn't find config in directory!")
+
+    finally:
+        p.shutdown_platform()
+        p.cleanup()
+
+
 def test_can_enable_sys_queue(get_pyproject_toml):
     p = None
     try:
