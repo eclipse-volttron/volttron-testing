@@ -492,6 +492,31 @@ class PlatformWrapper:
 
             return agent
 
+    def run_command(self, cmd: list, cwd: Path | str = None) -> str:
+        """
+        Execute a shell command within the virtual environment.  This will run
+        in the platformwrapper's context.
+
+        if cwd is not set then the cwd will be set to `self.volttron_home`
+
+        :raises CalledProcessError: If subprocess return value is not 0.
+        :param cmd: list passed to subprocess
+        :param cwd: directory to run the command in.
+        :return: response of the call.
+        """
+        if cwd is None:
+            cwd = self.volttron_home
+        elif isinstance(cwd, Path):
+            cwd = cwd.as_posix()
+
+        try:
+            output = self._virtual_env.run(args=cmd, capture=True, cwd=cwd, env=self._platform_environment, text=True)
+        except CalledProcessError as e:
+            print(f"Error:\n{e.output}")
+            raise
+
+        return output
+
     def install_library(self, library: str | Path, version: str = "latest"):
 
         if isinstance(library, Path):
@@ -504,7 +529,8 @@ class PlatformWrapper:
             cmd = f"poetry add {library}@latest"
 
         try:
-            output = self._virtual_env.run(args=cmd, capture=True, cwd=self.volttron_home)
+            output = self._virtual_env.run(args=cmd, env=self._platform_environment, capture=True,
+                                           cwd=self.volttron_home)
         except CalledProcessError as e:
             print(f"Error:\n{e.output}")
             raise
