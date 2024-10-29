@@ -666,8 +666,7 @@ class PlatformWrapper:
         except CalledProcessError as e:
             print(f"Error:\n{e.output}")
             raise
-        print(output)
-        print("Woot env installed!")
+        self.logit(output)
 
     def startup_platform(self, timeout:int = 30):
         """
@@ -704,7 +703,7 @@ class PlatformWrapper:
             if self.is_running():
                 raise PlatformWrapperError("Already running platform")
 
-            cmd = [self._volttron_exe, '-vv'] # , "-l", self._log_path]
+            cmd = [self._volttron_exe, '-vv', "-l", self._log_path]
 
             from pprint import pprint
             print('process environment: ')
@@ -1422,7 +1421,7 @@ class PlatformWrapper:
             self.logit("Skipping cleanup")
             return
 
-        shutil.rmtree(self.volttron_home, ignore_errors=True)
+        self.__remove_environment_directory__()
 
 
     def shutdown_platform(self):
@@ -1499,11 +1498,6 @@ class PlatformWrapper:
         data = []
         data.append('volttron_home: {}'.format(self.volttron_home))
         return '\n'.join(data)
-
-    def cleanup(self):
-        if self.is_running():
-            raise ValueError("Shutdown platform before cleaning directory.")
-        self.__remove_environment_directory__()
 
     def restart_agent(self, agent_uuid: AgentUUID):
         cmd = f"vctl restart {agent_uuid}"
