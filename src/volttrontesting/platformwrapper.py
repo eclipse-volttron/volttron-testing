@@ -405,6 +405,33 @@ class PlatformWrapper:
             if agent.get('identity') == identity:
                 return agent
 
+    def run_command(self, command: list):
+        """
+        Run a vctl command within the appropriate environment for the PlatformWrapper instance.
+
+        Args:
+            command (list): List of command arguments for vctl.
+        """
+        # Set up the environment with VOLTTRON_HOME and the virtual environment path
+        env = self._platform_environment
+        env["VIRTUAL_ENV"] = f"{env['VIRTUAL_ENV']}"
+        env["VOLTTRON_HOME"] = f"{env['VOLTTRON_HOME']}"
+        env["PATH"] = f"{env['VIRTUAL_ENV']}/bin:{env['VOLTTRON_HOME']}/bin:{env['PATH']}"
+
+        # Run the command and capture output
+        result = subprocess.run(
+            command,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+
+        # Print or return the result for debugging
+        print(f"Command: {' '.join(['vctl'] + command)}")
+        print("Output:", result.stdout)
+        return result
+
     # def build_connection(self, peer=None, address=None, identity=None,
     #                      publickey=None, secretkey=None, serverkey=None,
     #                      capabilities: Optional[dict] = None, **kwargs):
@@ -493,18 +520,29 @@ class PlatformWrapper:
             return agent
 
     def install_library(self, library: str | Path, version: str = "latest"):
-
         if isinstance(library, Path):
-            # Install locally could be a wheel or a pyproject.toml project
-            raise NotImplemented("Local path library is available yet.")
-
-        if version != "latest":
-            cmd = f"poetry add {library}=={version}"
+            library = library.resolve()  # Ensure we have an absolute path
+            if library.is_file() and library.suffix == ".whl":
+                # Install the wheel file directly
+                cmd = f"poetry add {library}"
+            elif library.is_dir() and (library / "pyproject.toml").exists():
+                # Install from a directory with pyproject.toml
+                cmd = f"poetry add {library}"
+            elif library.is_dir() and (library / "setup.py").exists():
+                # Install from a directory with setup.py (legacy support)
+                cmd = f"poetry add {library}"
+            else:
+                raise ValueError("The specified path is not a valid wheel file or project directory.")
         else:
-            cmd = f"poetry add {library}@latest"
+            # Handle remote package installation
+            if version != "latest":
+                cmd = f"poetry add {library}=={version}"
+            else:
+                cmd = f"poetry add {library}@latest"
 
         try:
             output = self._virtual_env.run(args=cmd, capture=True, cwd=self.volttron_home)
+            print(f"Library '{library}' installed successfully.")
         except CalledProcessError as e:
             print(f"Error:\n{e.output}")
             raise
