@@ -405,7 +405,7 @@ class PlatformWrapper:
             if agent.get('identity') == identity:
                 return agent
 
-    def run_command(self, command: list):
+    def run_vctl_command(self, command: list):
         """
         Run a vctl command within the appropriate environment for the PlatformWrapper instance.
 
