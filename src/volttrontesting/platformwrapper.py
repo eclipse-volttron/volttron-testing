@@ -405,6 +405,33 @@ class PlatformWrapper:
             if agent.get('identity') == identity:
                 return agent
 
+    def run_command(self, command: list):
+        """
+        Run a vctl command within the appropriate environment for the PlatformWrapper instance.
+
+        Args:
+            command (list): List of command arguments for vctl.
+        """
+        # Set up the environment with VOLTTRON_HOME and the virtual environment path
+        env = self._platform_environment
+        env["VIRTUAL_ENV"] = f"{env['VIRTUAL_ENV']}"
+        env["VOLTTRON_HOME"] = f"{env['VOLTTRON_HOME']}"
+        env["PATH"] = f"{env['VIRTUAL_ENV']}/bin:{env['VOLTTRON_HOME']}/bin:{env['PATH']}"
+
+        # Run the command and capture output
+        result = subprocess.run(
+            command,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+
+        # Print or return the result for debugging
+        print(f"Command: {' '.join(['vctl'] + command)}")
+        print("Output:", result.stdout)
+        return result
+
     # def build_connection(self, peer=None, address=None, identity=None,
     #                      publickey=None, secretkey=None, serverkey=None,
     #                      capabilities: Optional[dict] = None, **kwargs):
@@ -492,33 +519,7 @@ class PlatformWrapper:
 
             return agent
 
-    def run_command(self, cmd: list, cwd: Path | str = None) -> str:
-        """
-        Execute a shell command within the virtual environment.  This will run
-        in the platformwrapper's context.
-
-        if cwd is not set then the cwd will be set to `self.volttron_home`
-
-        :raises CalledProcessError: If subprocess return value is not 0.
-        :param cmd: list passed to subprocess
-        :param cwd: directory to run the command in.
-        :return: response of the call.
-        """
-        if cwd is None:
-            cwd = self.volttron_home
-        elif isinstance(cwd, Path):
-            cwd = cwd.as_posix()
-
-        try:
-            output = self._virtual_env.run(args=cmd, capture=True, cwd=cwd, env=self._platform_environment, text=True)
-        except CalledProcessError as e:
-            print(f"Error:\n{e.output}")
-            raise
-
-        return output
-
     def install_library(self, library: str | Path, version: str = "latest"):
-
         if isinstance(library, Path):
             library = library.resolve()  # Ensure we have an absolute path
             if library.is_file() and library.suffix == ".whl":
@@ -533,14 +534,15 @@ class PlatformWrapper:
             else:
                 raise ValueError("The specified path is not a valid wheel file or project directory.")
         else:
+            # Handle remote package installation
             if version != "latest":
                 cmd = f"poetry add {library}=={version}"
             else:
                 cmd = f"poetry add {library}@latest"
 
         try:
-            output = self._virtual_env.run(args=cmd, env=self._platform_environment, capture=True,
-                                           cwd=self.volttron_home)
+            output = self._virtual_env.run(args=cmd, capture=True, cwd=self.volttron_home)
+            print(f"Library '{library}' installed successfully.")
         except CalledProcessError as e:
             print(f"Error:\n{e.output}")
             raise
@@ -702,7 +704,8 @@ class PlatformWrapper:
         except CalledProcessError as e:
             print(f"Error:\n{e.output}")
             raise
-        self.logit(output)
+        print(output)
+        print("Woot env installed!")
 
     def startup_platform(self, timeout:int = 30):
         """
@@ -739,7 +742,7 @@ class PlatformWrapper:
             if self.is_running():
                 raise PlatformWrapperError("Already running platform")
 
-            cmd = [self._volttron_exe, '-vv', "-l", self._log_path]
+            cmd = [self._volttron_exe, '-vv'] # , "-l", self._log_path]
 
             from pprint import pprint
             print('process environment: ')
@@ -1457,7 +1460,7 @@ class PlatformWrapper:
             self.logit("Skipping cleanup")
             return
 
-        self.__remove_environment_directory__()
+        shutil.rmtree(self.volttron_home, ignore_errors=True)
 
 
     def shutdown_platform(self):
@@ -1534,6 +1537,11 @@ class PlatformWrapper:
         data = []
         data.append('volttron_home: {}'.format(self.volttron_home))
         return '\n'.join(data)
+
+    def cleanup(self):
+        if self.is_running():
+            raise ValueError("Shutdown platform before cleaning directory.")
+        self.__remove_environment_directory__()
 
     def restart_agent(self, agent_uuid: AgentUUID):
         cmd = f"vctl restart {agent_uuid}"
