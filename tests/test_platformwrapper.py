@@ -22,19 +22,17 @@
 # ===----------------------------------------------------------------------===
 # }}}
 
-from configparser import ConfigParser
-import time
 import os
+import time
+from configparser import ConfigParser
+from unittest.mock import MagicMock
 
 import gevent
 import pytest
-from mock import MagicMock
-
 from volttron.client.known_identities import CONTROL
 from volttron.utils import jsonapi
 from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
-from volttrontesting.utils import get_rand_tcp_address, get_rand_http_address
-
+from volttrontesting.utils import get_rand_http_address, get_rand_tcp_address
 
 
 def test_will_update_throws_typeerror():
