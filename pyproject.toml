@@ -24,12 +24,8 @@ pytest = "^7.0.0"
 # mock is built-in for Python 3.3+ as unittest.mock
 anypubsub = "^0.6"
 # grequests removed - not needed, using urllib instead
-volttron-core = "^2.0.0rc16"
+volttron-core = ">=2.0.0rc16"
 python-dateutil = "^2.8.2"
-gevent = "^24.2.1"
-psutil = "^5.9.0"
-pyyaml = "^6.0"
-
 docker = "^6.0.1"
 pytest-timeout = "^2.3.1"
 
