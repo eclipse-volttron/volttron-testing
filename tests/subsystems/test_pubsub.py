@@ -2,7 +2,7 @@ from datetime import datetime
 
 import gevent
 import pytest
-from mock import MagicMock, patch
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from volttron.client.messaging import headers as headers_mod

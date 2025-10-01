@@ -32,17 +32,11 @@ import logging
 from typing import Optional, Dict, Any, Callable, List
 from dataclasses import dataclass, field
 
+from volttron.types.agent_context import AgentContext
+from volttron.types.auth.auth_credentials import Credentials
+from volttrontesting.mock_core import MockCore as ProperMockCore
+
 _log = logging.getLogger(__name__)
-
-
-@dataclass
-class MockCore:
-    """Mock core for testing"""
-    identity: str
-    
-    def stop(self):
-        """Stop the core"""
-        pass
 
 
 @dataclass  
@@ -147,10 +141,26 @@ class MockAgent:
         :param identity: Agent identity
         :param kwargs: Additional arguments (ignored for compatibility)
         """
-        self.core = MockCore(identity=identity or "mock_agent")
+        identity = identity or kwargs.get('identity', 'mock_agent')
+        
+        # Create a simple mock context that has the required attributes
+        class MockAgentContext:
+            def __init__(self, identity):
+                self.credentials = Credentials(identity=identity)
+                self.address = None
+                self.message_bus = 'mock'
+                self.volttron_home = None
+                
+        context = MockAgentContext(identity)
+        context.address = kwargs.get('address')
+        context.message_bus = kwargs.get('message_bus', 'mock')
+        context.volttron_home = kwargs.get('volttron_home')
+        
+        self.core = ProperMockCore(context, owner=self)
         self.vip = MockVIP()
         self._callbacks = {}
-        _log.debug(f"Created MockAgent with identity: {self.core.identity}")
+        self.identity = identity
+        _log.debug(f"Created MockAgent with identity: {identity}")
         
     def set_pubsub_handler(self, handler):
         """Set the pubsub handler (e.g., TestServer)"""

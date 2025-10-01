@@ -65,10 +65,20 @@ class MockCore(CoreLoop):
         # Send setup signal
         self._onsetup_signal.send(self, **{})
     
+    def run(self, event=None):
+        """Run the mock core - compatible with gevent.spawn"""
+        self.setup()
+        running_event = Event()
+        running_event.set()
+        self.loop(running_event)
+        if event:
+            event.set()
+    
     def loop(self, running_event):
         """Main loop for the mock core"""
         self._running = True
-        self._connection.connect()
+        if self._connection:
+            self._connection.connect()
         
         # Trigger onconnected signal
         self._onconnected_signal.send(self, **{})
@@ -81,9 +91,10 @@ class MockCore(CoreLoop):
             gevent.sleep(0.1)
             
             # Process any incoming messages
-            message = self._connection.receive_vip_message(timeout=0.1)
-            if message:
-                self._handle_message(message)
+            if self._connection:
+                message = self._connection.receive_vip_message(timeout=0.1)
+                if message:
+                    self._handle_message(message)
         
         # Trigger ondisconnected signal
         self._ondisconnected_signal.send(self, **{})

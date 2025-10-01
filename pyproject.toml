@@ -26,6 +26,7 @@ anypubsub = "^0.6"
 # todo remove dependency on grequests
 grequests = "^0.6.0"
 volttron-core = ">=2.0.0rc16"
+volttron-lib-auth = ">=2.0.0rc6"
 python-dateutil = "^2.8.2"
 docker = "^6.0.1"
 pytest-timeout = "^2.3.1"
