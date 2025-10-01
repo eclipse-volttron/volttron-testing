@@ -92,6 +92,9 @@ class PubSubInterceptor:
             # Create wrapper for the callback
             def wrapper_callback(topic, headers, message, bus):
                 # Call original callback with expected signature
+                # Handle None headers
+                if headers is None:
+                    headers = {}
                 sender = headers.get('sender', 'unknown')
                 try:
                     callback(peer, sender, bus, topic, headers, message)

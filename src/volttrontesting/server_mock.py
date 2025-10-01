@@ -333,9 +333,21 @@ class PubSubWrapper(SubSystemWrapper):
         return result
 
     def _do_subscribe(self, peer, prefix, callback, bus="", all_platforms=False, persistent_queue=None):
-        anysub = self._test_server.subscribe(prefix, callback=callback)
+        # Wrap callback to convert from TestServer signature to VIP signature
+        def wrapper_callback(topic, headers, message, bus=''):
+            # Call with VIP signature (peer, sender, bus, topic, headers, message)
+            if headers is None:
+                headers = {}
+            sender = headers.get('sender', 'unknown')
+            callback(peer, sender, bus, topic, headers, message)
+        
+        anysub = self._test_server.subscribe(prefix, callback=wrapper_callback)
         subscription = Subscription(prefix, callback=callback, anysub_subscriber=anysub)
         if prefix in self._subscriptions:
             self._subscriptions[prefix].append(subscription)
         else:
             self._subscriptions[prefix] = [subscription]
+        # Return an AsyncResult for compatibility
+        result = AsyncResult()
+        result.set(subscription)
+        return result

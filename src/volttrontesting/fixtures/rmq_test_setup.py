@@ -22,16 +22,35 @@
 # ===----------------------------------------------------------------------===
 # }}}
 
+# NOTE: This module is currently not in use and requires RabbitMQ-specific 
+# volttron modules that are not available in volttron-core.
+# It is kept for potential future RabbitMQ support.
+
 import logging
 import os
 import shutil
 
 import yaml
 
-from volttron.platform import instance_setup, get_home
-from volttron.utils import store_message_bus_config
-from volttron.utils.rmq_setup import setup_rabbitmq_volttron
-from volttrontesting.utils.utils import get_hostname_and_random_port
+# These imports will fail without RabbitMQ-specific volttron packages
+try:
+    from volttron.platform import instance_setup, get_home
+    from volttron.utils import store_message_bus_config
+    from volttron.utils.rmq_setup import setup_rabbitmq_volttron
+    RMQ_AVAILABLE = True
+except ImportError:
+    RMQ_AVAILABLE = False
+    # Provide stubs to prevent import errors
+    def instance_setup(*args, **kwargs):
+        raise NotImplementedError("RabbitMQ support not available")
+    def get_home():
+        raise NotImplementedError("RabbitMQ support not available")
+    def store_message_bus_config(*args, **kwargs):
+        raise NotImplementedError("RabbitMQ support not available")
+    def setup_rabbitmq_volttron(*args, **kwargs):
+        raise NotImplementedError("RabbitMQ support not available")
+
+from volttrontesting.utils import get_hostname_and_random_port
 
 HOME = os.environ.get('HOME')
 _log = logging.getLogger(__name__)
