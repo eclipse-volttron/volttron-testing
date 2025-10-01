@@ -23,7 +23,8 @@ python = ">=3.10,<4.0"
 pytest = "^7.0.0"
 # mock is built-in for Python 3.3+ as unittest.mock
 anypubsub = "^0.6"
-# grequests removed - not needed, using urllib instead
+# todo remove dependency on grequests
+grequests = "^0.6.0"
 volttron-core = ">=2.0.0rc16"
 python-dateutil = "^2.8.2"
 docker = "^6.0.1"
