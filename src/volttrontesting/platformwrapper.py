@@ -656,12 +656,12 @@ class PlatformWrapper:
             # before connecting to the platform with the agent.
             gevent.sleep(2)
             
-            # For mock mode, use a mock agent if Agent class is not available
-            if self.messagebus == 'mock' and (agent_class is None or Agent is None):
+            # For mock mode, always use MockAgent unless a specific agent_class is provided
+            if self.messagebus == 'mock' and agent_class is None:
                 from volttrontesting.mock_agent import MockAgent
                 agent_class = MockAgent
                 
-            # Make sure we have an agent class
+            # Make sure we have an agent class (for non-mock mode)
             if agent_class is None:
                 agent_class = Agent
                 
@@ -708,9 +708,14 @@ class PlatformWrapper:
             if self.messagebus == 'mock' and self.test_server:
                 self.test_server.connect_agent(agent)
                 
-                # Set up pubsub interception to route through TestServer
-                from volttrontesting.pubsub_interceptor import intercept_agent_pubsub
-                intercept_agent_pubsub(agent, self.test_server.__server_pubsub__)
+                # If using MockAgent, set up test server reference for full VIP functionality
+                if hasattr(agent, 'set_test_server'):
+                    agent.set_test_server(self.test_server)
+                else:
+                    # Set up pubsub interception to route through TestServer for regular agents
+                    from volttrontesting.pubsub_interceptor import intercept_agent_pubsub
+                    intercept_agent_pubsub(agent, self.test_server.__server_pubsub__)
+                    
                 self.logit(f"Connected agent {identity} to TestServer with pubsub interception")
 
             if should_spawn:
@@ -947,6 +952,16 @@ class PlatformWrapper:
                 
                 # Set serverkey for mock mode
                 self.serverkey = platform_public
+                
+                # Update config file with address for mock mode
+                config_path = os.path.join(self.volttron_home, "config")
+                if os.path.exists(config_path):
+                    config = ConfigParser()
+                    config.read(config_path)
+                    if not config.has_option("volttron", "address"):
+                        config.set("volttron", "address", address)
+                        with open(config_path, "w") as configfile:
+                            config.write(configfile)
                 
                 # Set up minimal required attributes for mock mode
                 self.p_process = None

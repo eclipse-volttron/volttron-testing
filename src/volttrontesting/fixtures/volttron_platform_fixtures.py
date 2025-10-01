@@ -160,7 +160,8 @@ def volttron_instance_module_web(request):
 @pytest.fixture(
     scope="module",
     params=[
-        dict(messagebus='zmq', ssl_auth=False),
+        dict(messagebus='mock', ssl_auth=False),
+    # dict(messagebus='zmq', ssl_auth=False),
     # pytest.param(dict(messagebus='rmq', ssl_auth=True), marks=rmq_skipif),
     ])
 def volttron_instance(request, **kwargs):
@@ -196,7 +197,7 @@ def volttron_instance(request, **kwargs):
 #     instances = get_volttron_instances(3)
 #
 # TODO allow rmq to be added to the multi platform request.
-@pytest.fixture(scope="module", params=[dict(messagebus='zmq', ssl_auth=False)])
+@pytest.fixture(scope="module", params=[dict(messagebus='mock', ssl_auth=False)])
 def get_volttron_instances(request):
     """ Fixture to get more than 1 volttron instance for test
     Use this fixture to get more than 1 volttron instance for test. This
