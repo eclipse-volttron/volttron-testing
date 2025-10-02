@@ -166,3 +166,12 @@ class MockCore(CoreLoop):
         if handle_error:
             self._error_handlers[subsystem] = handle_error
         _log.debug(f"Registered subsystem handler: {subsystem}")
+    
+    @property
+    def schedule(self):
+        """Return the schedule wrapper if available"""
+        # This will be set by TestServer when the agent is connected
+        if hasattr(self, '_schedule_wrapper'):
+            return self._schedule_wrapper
+        # Return a default schedule object that does nothing (for non-test scenarios)
+        return None
