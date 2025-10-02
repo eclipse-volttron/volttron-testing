@@ -322,18 +322,83 @@ def test_data_collector_agent():
     interceptor.restore()
 ```
 
+### Testing Scheduled Events
+
+Agents can now be tested with scheduled callbacks (periodic, cron, and time-based):
+
+```python
+from volttrontesting.server_mock import TestServer
+from volttron.client import Agent
+from volttron.client.vip.agent import Core
+from volttron.types.auth.auth_credentials import Credentials
+
+class ScheduledAgent(Agent):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.periodic_count = 0
+    
+    @Core.receiver('onstart')
+    def onstart(self, sender, **kwargs):
+        # Schedule periodic task every 5 seconds
+        self.core.schedule.periodic(self.periodic_task, 5.0)
+    
+    def periodic_task(self):
+        self.periodic_count += 1
+
+def test_scheduled_agent():
+    """Test agent with scheduled events."""
+    server = TestServer()
+    agent = ScheduledAgent(credentials=Credentials(identity="scheduler"), name="mock")
+    server.connect_agent(agent)
+    
+    # Trigger onstart to set up schedules
+    server.trigger_start_event(agent, sender="test")
+    
+    # Verify event was scheduled
+    events = server.get_periodic_events(agent)
+    assert len(events) == 1
+    assert events[0].period == 5.0
+    
+    # Manually trigger the scheduled callback
+    server.trigger_scheduled_event(events[0])
+    assert agent.periodic_count == 1
+    
+    # Trigger multiple times
+    server.trigger_scheduled_event(events[0])
+    server.trigger_scheduled_event(events[0])
+    assert agent.periodic_count == 3
+```
+
+See [Schedule Testing Guide](docs/SCHEDULE_TESTING.md) for more details and advanced usage.
+
 ### TestServer API Reference
 
 The `TestServer` class provides these key methods for testing:
 
+#### Lifecycle and Connection
 - `connect_agent(agent)`: Connect an agent to the test server
-- `publish(topic, headers, message)`: Publish a message through the server
-- `subscribe(pattern, callback)`: Subscribe to messages with a pattern
 - `trigger_setup_event(agent)`: Trigger agent's onsetup lifecycle event
 - `trigger_start_event(agent)`: Trigger agent's onstart lifecycle event
 - `trigger_stop_event(agent)`: Trigger agent's onstop lifecycle event
+
+#### PubSub
+- `publish(topic, headers, message)`: Publish a message through the server
+- `subscribe(pattern, callback)`: Subscribe to messages with a pattern
 - `get_published_messages()`: Get all messages published through the server
+
+#### Scheduling (NEW)
+- `get_scheduled_events(agent)`: Get all scheduled events for an agent
+- `get_periodic_events(agent)`: Get periodic scheduled events
+- `get_cron_events(agent)`: Get cron scheduled events
+- `get_time_events(agent)`: Get time-based scheduled events
+- `verify_event_scheduled(agent, event_type, period, cron_schedule, timeout)`: Verify an event has been scheduled
+- `trigger_scheduled_event(event)`: Manually trigger a scheduled event's callback
+- `run_scheduled_event_with_greenlet(event, delay)`: Run a scheduled event in a greenlet
+
+#### Logging
 - `get_server_log()`: Get server log messages
+
+For detailed information on testing scheduled events, see [Schedule Testing Guide](docs/SCHEDULE_TESTING.md).
 
 ## Development
 
