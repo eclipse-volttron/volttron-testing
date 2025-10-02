@@ -397,3 +397,57 @@ def test_event_run_count_tracking():
     
     assert event.run_count == 5
     assert len(counter) == 5
+
+
+def test_schedule_callable_direct():
+    """Test that ScheduleWrapper is callable for direct scheduling"""
+    server = TestServer()
+    agent = MockAgent(identity="test_agent")
+    server.connect_agent(agent)
+    
+    callback_executed = []
+    
+    def callback(value):
+        callback_executed.append(value)
+        return value * 2
+    
+    # Call schedule directly with delay
+    event = agent.core.schedule(callback, 2.0, 10)
+    
+    # Verify event was created
+    assert event is not None
+    assert event.event_type == 'time'
+    assert event.callback == callback
+    assert event.args == (10,)
+    
+    # Verify event is tracked
+    events = server.get_time_events(agent)
+    assert len(events) == 1
+    assert events[0] == event
+    
+    # Trigger the event
+    result = server.trigger_scheduled_event(event)
+    assert result == 20
+    assert callback_executed == [10]
+
+
+def test_schedule_callable_immediate():
+    """Test scheduling with zero delay (immediate execution in tests)"""
+    server = TestServer()
+    agent = MockAgent(identity="test_agent")
+    server.connect_agent(agent)
+    
+    executed = []
+    
+    def callback():
+        executed.append(True)
+    
+    # Schedule with default delay (0)
+    event = agent.core.schedule(callback)
+    
+    assert event is not None
+    assert event.event_type == 'time'
+    
+    # Manually trigger
+    server.trigger_scheduled_event(event)
+    assert executed == [True]

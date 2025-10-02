@@ -264,7 +264,7 @@ class DataCollectorAgent(Agent):
     @Core.receiver('onstart')
     def onstart(self, sender, **kwargs):
         """Start collecting data on agent start."""
-        self.core.periodic(self.publish_aggregated, 5)
+        self.core.schedule.periodic(self.publish_aggregated, 5)
     
     @PubSub.subscribe('pubsub', 'devices/+/+/all')
     def on_new_data(self, peer, sender, bus, topic, headers, message):
@@ -324,7 +324,7 @@ def test_data_collector_agent():
 
 ### Testing Scheduled Events
 
-Agents can now be tested with scheduled callbacks (periodic, cron, and time-based):
+Agents can now be tested with all types of scheduled callbacks:
 
 ```python
 from volttrontesting.server_mock import TestServer
@@ -339,6 +339,9 @@ class ScheduledAgent(Agent):
     
     @Core.receiver('onstart')
     def onstart(self, sender, **kwargs):
+        # Direct call: schedule after delay
+        self.core.schedule(self.one_time_task, 2.0)
+        
         # Schedule periodic task every 5 seconds
         self.core.schedule.periodic(self.periodic_task, 5.0)
     

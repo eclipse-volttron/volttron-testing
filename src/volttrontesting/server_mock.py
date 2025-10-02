@@ -462,6 +462,31 @@ class ScheduleWrapper(SubSystemWrapper):
         self._test_server = test_server
         self._events: List[ScheduledEvent] = []
     
+    def __call__(self, callback: Callable, delay: float = 0, *args, **kwargs):
+        """
+        Schedule a callback to run once after a delay.
+        This makes the schedule object callable: core.schedule(callback, delay)
+        
+        :param callback: Function to call
+        :param delay: Delay in seconds (default: 0 for immediate execution)
+        :param args: Positional arguments to pass to callback
+        :param kwargs: Keyword arguments to pass to callback
+        :return: ScheduledEvent object
+        """
+        # Schedule at a specific time (current time + delay)
+        from datetime import timedelta
+        scheduled_time = datetime.now() + timedelta(seconds=delay)
+        event = ScheduledEvent(
+            event_type='time',
+            callback=callback,
+            args=args,
+            kwargs=kwargs,
+            scheduled_time=scheduled_time
+        )
+        self._events.append(event)
+        self._test_server._register_scheduled_event(self._identity, event)
+        return event
+    
     def periodic(self, callback: Callable, period: float, *args, **kwargs):
         """Schedule a callback to run periodically"""
         event = ScheduledEvent(
