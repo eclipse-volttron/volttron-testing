@@ -31,8 +31,10 @@ from enum import Enum
 import re
 from logging import Logger
 from typing import Dict, Callable, Any, Tuple, List, Optional
+from datetime import datetime
 
 from gevent.event import AsyncResult
+import gevent
 
 from volttrontesting.memory_pubsub import MemoryPubSub, MemorySubscriber, PublishedMessage
 
@@ -116,6 +118,8 @@ class TestServer:
     __methods__: Dict[str, Callable]
     __server_pubsub__: MemoryPubSub
     __pubsub_wrappers__: Dict[str, PubSubWrapper]
+    __schedule_wrappers__: Dict[str, ScheduleWrapper]
+    __scheduled_events__: Dict[str, List[ScheduledEvent]]
 
     def __new__(cls, *args, **kwargs):
         TestServer.__connected_agents__ = {}
@@ -124,6 +128,8 @@ class TestServer:
         TestServer.__pubsub_wrappers__ = {}
         TestServer.__server_pubsub__ = MemoryPubSub()
         TestServer.__server_log__ = ServerLogWrapper()
+        TestServer.__schedule_wrappers__ = {}
+        TestServer.__scheduled_events__ = {}
         return super(TestServer, cls).__new__(cls)
 
     def __init__(self):
@@ -160,6 +166,115 @@ class TestServer:
 
     def get_server_log(self) -> List[LogMessage]:
         return self.__server_log__.log_queue
+
+    def _register_scheduled_event(self, identity: str, event: ScheduledEvent):
+        """Internal method to register a scheduled event"""
+        if identity not in self.__scheduled_events__:
+            self.__scheduled_events__[identity] = []
+        self.__scheduled_events__[identity].append(event)
+
+    def get_scheduled_events(self, identity_or_agent: [str, Agent]) -> List[ScheduledEvent]:
+        """
+        Get all scheduled events for an agent.
+        
+        :param identity_or_agent: Agent identity string or Agent instance
+        :return: List of scheduled events
+        """
+        identity = identity_or_agent
+        if isinstance(identity_or_agent, Agent):
+            identity = identity_or_agent.core.identity
+        return self.__scheduled_events__.get(identity, [])
+
+    def get_periodic_events(self, identity_or_agent: [str, Agent]) -> List[ScheduledEvent]:
+        """Get all periodic scheduled events for an agent"""
+        events = self.get_scheduled_events(identity_or_agent)
+        return [e for e in events if e.event_type == 'periodic' and not e.cancelled]
+
+    def get_cron_events(self, identity_or_agent: [str, Agent]) -> List[ScheduledEvent]:
+        """Get all cron scheduled events for an agent"""
+        events = self.get_scheduled_events(identity_or_agent)
+        return [e for e in events if e.event_type == 'cron' and not e.cancelled]
+
+    def get_time_events(self, identity_or_agent: [str, Agent]) -> List[ScheduledEvent]:
+        """Get all time-based scheduled events for an agent"""
+        events = self.get_scheduled_events(identity_or_agent)
+        return [e for e in events if e.event_type == 'time' and not e.cancelled]
+
+    def trigger_scheduled_event(self, event: ScheduledEvent) -> Any:
+        """
+        Manually trigger a scheduled event's callback.
+        
+        :param event: The ScheduledEvent to trigger
+        :return: The return value of the callback
+        """
+        if event.cancelled:
+            raise ValueError("Cannot trigger a cancelled event")
+        
+        event.last_run = datetime.now()
+        event.run_count += 1
+        
+        try:
+            return event.callback(*event.args, **event.kwargs)
+        except Exception as e:
+            # Log the error but don't fail the test
+            print(f"Error executing scheduled callback: {e}")
+            raise
+
+    def run_scheduled_event_with_greenlet(self, event: ScheduledEvent, delay: float = 0) -> gevent.Greenlet:
+        """
+        Run a scheduled event in a greenlet with an optional delay.
+        
+        :param event: The ScheduledEvent to run
+        :param delay: Delay in seconds before executing
+        :return: The greenlet running the event
+        """
+        def run_with_delay():
+            if delay > 0:
+                gevent.sleep(delay)
+            self.trigger_scheduled_event(event)
+        
+        greenlet = gevent.spawn(run_with_delay)
+        event.greenlet = greenlet
+        return greenlet
+
+    def verify_event_scheduled(self, identity_or_agent: [str, Agent], 
+                               event_type: str = None,
+                               period: float = None,
+                               cron_schedule: str = None,
+                               timeout: float = 5.0) -> bool:
+        """
+        Verify that an event has been scheduled within a timeout period.
+        
+        :param identity_or_agent: Agent identity string or Agent instance
+        :param event_type: Type of event to look for ('periodic', 'cron', 'time')
+        :param period: For periodic events, the expected period
+        :param cron_schedule: For cron events, the expected schedule
+        :param timeout: Maximum time to wait for the event (in seconds)
+        :return: True if event is found, False otherwise
+        """
+        start_time = datetime.now()
+        
+        while (datetime.now() - start_time).total_seconds() < timeout:
+            events = self.get_scheduled_events(identity_or_agent)
+            
+            for event in events:
+                if event.cancelled:
+                    continue
+                    
+                if event_type and event.event_type != event_type:
+                    continue
+                    
+                if period is not None and event.period != period:
+                    continue
+                    
+                if cron_schedule and event.cron_schedule != cron_schedule:
+                    continue
+                
+                return True
+            
+            gevent.sleep(0.1)
+        
+        return False
 
     def __check_connected__(self, identity: str):
         """
@@ -256,6 +371,13 @@ class TestServer:
         if PubSubWrapper.__wrapper__ is None:
             PubSubWrapper.__wrapper__ = self.__server_pubsub__
         self.__pubsub_wrappers__[agent.core.identity] = PubSubWrapper(agent, self)
+        
+        # Set up schedule wrapper
+        schedule_wrapper = ScheduleWrapper(agent.core.identity, self)
+        self.__schedule_wrappers__[agent.core.identity] = schedule_wrapper
+        # Attach schedule wrapper to agent's core
+        agent.core._schedule_wrapper = schedule_wrapper
+        
         self.__server_log__.add_agent_log(agent, logger)
 
     def __get_lifecycle_dict__(self, agent, core_names_found) -> Dict[LifeCycleMembers, Callable]:
@@ -307,6 +429,109 @@ class Subscription:
     prefix: str
     callback: Callable
     anysub_subscriber: MemorySubscriber
+
+
+@dataclass
+class ScheduledEvent:
+    """Represents a scheduled event (periodic, cron, or specific time)"""
+    event_type: str  # 'periodic', 'cron', or 'time'
+    callback: Callable
+    args: tuple = field(default_factory=tuple)
+    kwargs: dict = field(default_factory=dict)
+    # For periodic events
+    period: Optional[float] = None
+    # For cron events
+    cron_schedule: Optional[str] = None
+    # For time-based events
+    scheduled_time: Optional[datetime] = None
+    # Tracking
+    created_at: datetime = field(default_factory=datetime.now)
+    last_run: Optional[datetime] = None
+    run_count: int = 0
+    # Control
+    cancelled: bool = False
+    greenlet: Optional[gevent.Greenlet] = None
+
+
+class ScheduleWrapper(SubSystemWrapper):
+    """Wrapper for core.schedule to track and control scheduled events"""
+    
+    def __init__(self, identity: str, test_server: 'TestServer'):
+        super().__init__()
+        self._identity = identity
+        self._test_server = test_server
+        self._events: List[ScheduledEvent] = []
+    
+    def __call__(self, callback: Callable, delay: float = 0, *args, **kwargs):
+        """
+        Schedule a callback to run once after a delay.
+        This makes the schedule object callable: core.schedule(callback, delay)
+        
+        :param callback: Function to call
+        :param delay: Delay in seconds (default: 0 for immediate execution)
+        :param args: Positional arguments to pass to callback
+        :param kwargs: Keyword arguments to pass to callback
+        :return: ScheduledEvent object
+        """
+        # Schedule at a specific time (current time + delay)
+        from datetime import timedelta
+        scheduled_time = datetime.now() + timedelta(seconds=delay)
+        event = ScheduledEvent(
+            event_type='time',
+            callback=callback,
+            args=args,
+            kwargs=kwargs,
+            scheduled_time=scheduled_time
+        )
+        self._events.append(event)
+        self._test_server._register_scheduled_event(self._identity, event)
+        return event
+    
+    def periodic(self, callback: Callable, period: float, *args, **kwargs):
+        """Schedule a callback to run periodically"""
+        event = ScheduledEvent(
+            event_type='periodic',
+            callback=callback,
+            args=args,
+            kwargs=kwargs,
+            period=period
+        )
+        self._events.append(event)
+        self._test_server._register_scheduled_event(self._identity, event)
+        return event
+    
+    def cron(self, callback: Callable, cron_schedule: str, *args, **kwargs):
+        """Schedule a callback to run on a cron schedule"""
+        event = ScheduledEvent(
+            event_type='cron',
+            callback=callback,
+            args=args,
+            kwargs=kwargs,
+            cron_schedule=cron_schedule
+        )
+        self._events.append(event)
+        self._test_server._register_scheduled_event(self._identity, event)
+        return event
+    
+    def schedule(self, callback: Callable, scheduled_time: datetime, *args, **kwargs):
+        """Schedule a callback to run at a specific time"""
+        event = ScheduledEvent(
+            event_type='time',
+            callback=callback,
+            args=args,
+            kwargs=kwargs,
+            scheduled_time=scheduled_time
+        )
+        self._events.append(event)
+        self._test_server._register_scheduled_event(self._identity, event)
+        return event
+    
+    def cancel_all(self):
+        """Cancel all scheduled events for this agent"""
+        for event in self._events:
+            event.cancelled = True
+            if event.greenlet:
+                event.greenlet.kill()
 
 
 class HeartBeatWrapper(SubSystemWrapper):
