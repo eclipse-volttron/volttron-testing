@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest import mock
 
 import gevent
@@ -62,7 +62,7 @@ all_message = [{'OutsideAirTemperature': 0.5,
                {'OutsideAirTemperature': {'units': 'F', 'tz': 'UTC', 'type': 'float'},
                 'MixedAirTemperature': {'units': 'F', 'tz': 'UTC', 'type': 'float'}
                 }]
-now = format_timestamp(datetime.utcnow())
+now = format_timestamp(datetime.now(timezone.utc))
 headers = {
             headers_mod.DATE: now,
             headers_mod.TIMESTAMP: now

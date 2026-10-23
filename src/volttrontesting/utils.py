@@ -26,7 +26,7 @@ import os
 import socket
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from random import randint, random
 from unittest import mock
 
@@ -154,7 +154,7 @@ def build_devices_header_and_message(points=['abc', 'def']):
         data[point] = random() * 10
         meta_data[point] = meta_templates[randint(0,len(meta_templates)-1)]
 
-    time1 = format_timestamp(datetime.utcnow())
+    time1 = format_timestamp(datetime.now(timezone.utc))
     headers = {
         headers_mod.DATE: time1,
         headers_mod.TIMESTAMP: time1

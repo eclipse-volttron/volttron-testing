@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import gevent
 import pytest
@@ -18,7 +18,7 @@ all_message = [{'OutsideAirTemperature': 0.5,
                {'OutsideAirTemperature': {'units': 'F', 'tz': 'UTC', 'type': 'float'},
                 'MixedAirTemperature': {'units': 'F', 'tz': 'UTC', 'type': 'float'}
                 }]
-now = format_timestamp(datetime.utcnow())
+now = format_timestamp(datetime.now(timezone.utc))
 headers = {
             headers_mod.DATE: now,
             headers_mod.TIMESTAMP: now
@@ -173,7 +173,7 @@ def tagging_agent(volttron_instance):
     assert volttron_instance.is_agent_running(tagging_agent_id)
 
 
-    now = format_timestamp(datetime.utcnow())
+    now = format_timestamp(datetime.now(timezone.utc))
     headers = {headers_mod.DATE: now,
                headers_mod.TIMESTAMP: now}
     to_send = [{'topic': 'devices/campus1/d2/all', 'headers': headers,
