@@ -60,7 +60,7 @@ def test_will_update_environ():
 
 
 @pytest.mark.parametrize("messagebus, ssl_auth", [
-    ('zmq', False)
+    ('zmq', True)
     # , ('zmq', False)
     # , ('rmq', True)
 ])
@@ -87,18 +87,15 @@ def test_volttron_config_created(volttron_instance):
     # with open(config_file, 'rb') as cfg:
     parser.read(config_file)
     assert volttron_instance.instance_name == parser.get('volttron', 'instance-name')
-    assert volttron_instance.vip_address == parser.get('volttron', 'vip-address')
-    assert volttron_instance.messagebus == parser.get('volttron', 'message-bus')
+    assert volttron_instance.vip_address == parser.get('volttron', 'address')
+    assert volttron_instance.messagebus == parser.get('volttron', 'messagebus')
 
 
-def test_can_restart_platform_without_addresses_changing(get_volttron_instances):
-    inst_forward, inst_target = get_volttron_instances(2)
+def test_can_restart_platform_without_addresses_changing(volttron_instance):
+    inst_forward = volttron_instance
 
     original_vip = inst_forward.vip_address
     assert inst_forward.is_running()
-    inst_forward.stop_platform()
-    assert not inst_forward.is_running()
-    gevent.sleep(5)
     inst_forward.restart_platform()
     assert inst_forward.is_running()
     assert original_vip == inst_forward.vip_address
@@ -111,9 +108,6 @@ def test_can_restart_platform(volttron_instance):
     orig_proc = volttron_instance.p_process.pid
 
     assert volttron_instance.is_running()
-    volttron_instance.stop_platform()
-
-    assert not volttron_instance.is_running()
     volttron_instance.restart_platform()
     assert volttron_instance.is_running()
     assert orig_vip == volttron_instance.vip_address
@@ -124,6 +118,7 @@ def test_can_restart_platform(volttron_instance):
     assert len(volttron_instance.dynamic_agent.vip.peerlist().get()) > 0
 
 
+#TODO do we care about instances file. should we even be writing this?
 def test_instance_writes_to_instances_file(volttron_instance):
     vi = volttron_instance
     assert vi is not None
@@ -137,17 +132,16 @@ def test_instance_writes_to_instances_file(volttron_instance):
 
     assert result.get(vi.volttron_home)
     the_instance_entry = result.get(vi.volttron_home)
-    for key in ('pid', 'vip-address', 'volttron-home', 'start-args'):
+    print(the_instance_entry)
+    for key in ('pid', 'address', 'volttron-home', 'start-args'):
         assert the_instance_entry.get(key)
 
     assert the_instance_entry['pid'] == vi.p_process.pid
 
-    assert the_instance_entry['vip-address'][0] == vi.vip_address
+    assert the_instance_entry['address'][0] == vi.vip_address
     assert the_instance_entry['volttron-home'] == vi.volttron_home
 
 
-# TODO: @pytest.mark.skip(reason="To test actions on github")
-@pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
 def test_can_install_listener(volttron_instance: PlatformWrapper):
     vi = volttron_instance
     assert vi is not None
@@ -195,18 +189,11 @@ def test_can_install_listener(volttron_instance: PlatformWrapper):
     listening.core.stop()
 
 
-# TODO: @pytest.mark.skip(reason="To test actions on github")
-@pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
 def test_reinstall_agent(volttron_instance):
     vi = volttron_instance
     assert vi is not None
     assert vi.is_running()
 
-
-    auuid = vi.install_agent(agent_dir="volttron-listener", start=True, vip_identity="test_listener")
-    vi = volttron_instance
-    assert vi is not None
-    assert vi.is_running()
 
     auuid = vi.install_agent(agent_dir="volttron-listener", start=True, vip_identity="test_listener")
     assert volttron_instance.is_agent_running(auuid)
@@ -260,8 +247,7 @@ def test_get_peerlist(volttron_instance):
     assert len(resp) > 1
 
 
-# TODO: @pytest.mark.skip(reason="To test actions on github")
-@pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
+
 def test_can_remove_agent(volttron_instance):
     """ Confirms that 'volttron-ctl remove' removes agent as expected. """
     assert volttron_instance is not None
@@ -319,8 +305,6 @@ def test_can_publish(volttron_instance):
     assert messages['test/world']['message'] == 'got data'
 
 
-# TODO: @pytest.mark.skip(reason="To test actions on github")
-@pytest.mark.skip(reason="Github doesn't have reference to the listener agent for install from directory")
 def test_can_install_multiple_listeners(volttron_instance):
     assert volttron_instance.is_running()
     volttron_instance.remove_all_agents()

@@ -34,7 +34,6 @@ import pytest
 from volttron.utils.context import ClientContext as cc
 # is_web_available
 #from volttron.platform import update_platform_config
-from volttron.utils.keystore import get_random_key
 from volttrontesting.fixtures.cert_fixtures import certs_profile_1
 from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
 from volttrontesting.platformwrapper import create_volttron_home
@@ -65,11 +64,11 @@ def print_log(volttron_home):
 
 def build_wrapper(vip_address: str, should_start: bool = True, messagebus: str = 'zmq',
                   remote_platform_ca: Optional[str] = None,
-                  instance_name: Optional[str] = None, secure_agent_users: bool = False, **kwargs):
+                  instance_name: Optional[str] = None, agent_isolation_mode: bool = False, **kwargs):
     wrapper = PlatformWrapper(ssl_auth=kwargs.pop('ssl_auth', False),
                               messagebus=messagebus,
                               instance_name=instance_name,
-                              secure_agent_users=secure_agent_users,
+                              agent_isolation_mode=agent_isolation_mode,
                               remote_platform_ca=remote_platform_ca)
     if should_start:
         wrapper.startup_platform(vip_address=vip_address, **kwargs)
@@ -133,7 +132,7 @@ def volttron_instance_module_web(request):
 # test
 @pytest.fixture(scope="module",
                 params=[
-                    dict(messagebus='zmq', ssl_auth=False),
+                    dict(messagebus='zmq', ssl_auth=True),
                     # pytest.param(dict(messagebus='rmq', ssl_auth=True), marks=rmq_skipif),
                 ])
 def volttron_instance(request, **kwargs):
@@ -483,15 +482,15 @@ def get_test_volttron_home(messagebus: str, web_https=False, web_http=False, has
             ip, port = get_rand_ip_and_port()
             vip_address = f"tcp://{ip}:{port}"
 
-    if web_https:
-        hostname, port = get_hostname_and_random_port()
-        bind_web_address = f"https://{hostname}:{port}"
-        web_ssl_cert = web_certs.server_certs[0].cert_file
-        web_ssl_key = web_certs.server_certs[0].key_file
-    elif web_http:
-        hostname, port = get_hostname_and_random_port()
-        bind_web_address = f"http://{hostname}:{port}"
-        web_secret_key = get_random_key()
+    # if web_https:
+    #     hostname, port = get_hostname_and_random_port()
+    #     bind_web_address = f"https://{hostname}:{port}"
+    #     web_ssl_cert = web_certs.server_certs[0].cert_file
+    #     web_ssl_key = web_certs.server_certs[0].key_file
+    # elif web_http:
+    #     hostname, port = get_hostname_and_random_port()
+    #     bind_web_address = f"http://{hostname}:{port}"
+    #     web_secret_key = get_random_key()
 
     if vip_address:
         config_file['vip-address'] = vip_address
