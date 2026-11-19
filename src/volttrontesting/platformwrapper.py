@@ -35,7 +35,7 @@ from configparser import ConfigParser
 from contextlib import closing, contextmanager
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import gevent
 import gevent.subprocess as subprocess
@@ -47,7 +47,6 @@ import yaml
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
-from pre_commit.meta_hooks import identity
 from volttron.auth import auth_service
 from volttron.auth.auth_service import ServerOptions, VolttronAuthService
 from volttron.client.known_identities import (
@@ -60,7 +59,7 @@ from volttron.client.known_identities import (
 )
 from volttron.client.vip.agent import Agent
 from volttron.server.aip import AIPplatform
-from volttron.types.agent_context import AgentOptions
+from volttron.types.agent_context import AgentInstallOptions, AgentOptions
 from volttron.types.auth import Authenticator, PKICredentials, VolttronCredentials
 from volttron.types.auth.auth_service import AuthService
 from volttron.types.server_config import ServerConfig, ServiceConfigs
@@ -225,7 +224,7 @@ def start_wrapper_platform(wrapper,
     # Please note, if 'with_http'==True, then instance name needs to be provided
     assert not wrapper.is_running()
     address = get_rand_vip()
-    wrapper.startup_platform(vip_address=address)
+    wrapper.startup_platform(address=address)
     assert wrapper.is_running()
 
 
@@ -294,9 +293,7 @@ class PlatformWrapper:
         # lower level fixture calls shutdown, this won't hang.
         self._instance_shutdown = False
 
-        # Determine dependencies based on messagebus type
         self.messagebus = messagebus if messagebus else 'zmq'
-        self.dependencies = self._determine_dependencies()
         
         # Initialize mock infrastructure for mock messagebus
         self.mock_config_store = {} if self.messagebus == 'mock' else None
@@ -619,7 +616,7 @@ class PlatformWrapper:
                     agent_cred = self._write_agent_credentials(identity)
 
             if address is None:
-                address = self.vip_address
+                address = self.address
 
             self.logit(f"Using vip-address {address}")
             self.logit(f"Got agent credentials for identity {identity} as {agent_cred}")
@@ -658,30 +655,11 @@ class PlatformWrapper:
             return agent
 
     def add_capabilities(self, publickey, capabilities):
-        if not AuthFile:
-            self.logit("AuthFile not available, skipping add_capabilities")
-            return
-
-        with with_os_environ(self.env):
-            if isinstance(capabilities, str) or isinstance(capabilities, dict):
-                capabilities = [capabilities]
-            auth_path = self.volttron_home + "/auth.json"
-            auth = AuthFile(auth_path)
-            entry = auth.find_by_credentials(publickey)[0]
-            caps = entry.capabilities
-
-            if isinstance(capabilities, list):
-                for c in capabilities:
-                    self.add_capability(c, caps)
-            else:
-                self.add_capability(capabilities, caps)
-            auth.add(entry, overwrite=True)
-            _log.debug("Updated entry is {}".format(entry))
-            # Minimum sleep of 2 seconds seem to be needed in order for auth updates to get propagated to peers.
-            # This slow down is not an issue with file watcher but rather vip.peerlist(). peerlist times out
-            # when invoked in quick succession. add_capabilities updates auth.json, gets the peerlist and calls all peers'
-            # auth.update rpc call. So sleeping here instead expecting individual test cases to sleep for long
-            gevent.sleep(2)
+        """Capabilities are authz roles on the modular platform; ``auth.json`` and ``AuthFile`` no longer exist.
+        Grant them with ``vctl authz`` or ``VolttronAuthzManager.create_or_merge_agent_authz`` (see
+        ``_write_agent_credentials``)."""
+        raise NotImplementedError(
+            "PlatformWrapper.add_capabilities: use vctl authz or VolttronAuthzManager on the modular platform")
 
     @staticmethod
     def add_capability(entry, capabilites):
@@ -695,7 +673,7 @@ class PlatformWrapper:
                 "Invalid capability {}. Capability should be string or dictionary or list of string"
                 "and dictionary.")
 
-    def startup_platform(self, vip_address,
+    def startup_platform(self, address,
                          mode=UNRESTRICTED,
                          msgdebug=False,
                          enable_logging=False,
@@ -810,7 +788,7 @@ class PlatformWrapper:
             self.opts.update({
                 'volttron_home': self.volttron_home,
                 'instance_name': self.instance_name,
-                'address': self.vip_address,
+                'address': self.address,
                 'local_address': ipc + 'vip.socket',
                 'agent_isolation_mode': "true" if self.agent_isolation_mode else "false",
                 'messagebus': self.messagebus,
@@ -827,7 +805,7 @@ class PlatformWrapper:
             # known_hosts.add(self.opts['vip_local_address'], publickey)
             # known_hosts.add(self.opts['vip_address'], publickey)
 
-            create_platform_config_file(self.messagebus, self.instance_name, self.vip_address, agent_monitor_frequency,
+            create_platform_config_file(self.messagebus, self.instance_name, self.address, agent_monitor_frequency,
                                         self.agent_isolation_mode)
             if self.ssl_auth:
                 certsdir = os.path.join(self.volttron_home, 'certificates')
@@ -972,7 +950,7 @@ class PlatformWrapper:
                       vip_identity: Optional[str] = None,
                       startup_time: int = 5,
                       force: bool = False,
-                      install_options: Optional[InstallAgentOptions] = None):
+                      install_options: Optional[AgentInstallOptions] = None):
         """
         Install and optionally start an agent on the instance.
 
@@ -997,7 +975,7 @@ class PlatformWrapper:
             Should this overwrite the current or not.
         :return:
         """
-        # If InstallAgentOptions provided, use those values
+        # If AgentInstallOptions provided, use those values
         if install_options:
             start = install_options.start
             vip_identity = install_options.vip_identity or vip_identity
@@ -1444,7 +1422,7 @@ class PlatformWrapper:
             self.shutdown_platform()
             self.skip_cleanup = original_skip_cleanup
             # since this is a restart, we don't want to do an update/overwrite of services.
-            self.startup_platform(vip_address=self.vip_address)
+            self.startup_platform(address=self.address)
             # we would need to reset shutdown flag so that platform is properly cleaned up on the next shutdown call
             self._instance_shutdown = False
             gevent.sleep(1)

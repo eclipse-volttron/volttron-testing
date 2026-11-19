@@ -88,7 +88,7 @@ def test_volttron_config_created(volttron_instance):
     # with open(config_file, 'rb') as cfg:
     parser.read(config_file)
     assert volttron_instance.instance_name == parser.get('volttron', 'instance-name')
-    assert volttron_instance.vip_address == parser.get('volttron', 'address')
+    assert volttron_instance.address == parser.get('volttron', 'address')
     assert volttron_instance.messagebus == parser.get('volttron', 'messagebus')
 
 
@@ -157,7 +157,7 @@ def test_instance_writes_to_instances_file(volttron_instance):
 
     assert the_instance_entry['pid'] == vi.p_process.pid
 
-    assert the_instance_entry['address'][0] == vi.vip_address
+    assert the_instance_entry['address'][0] == vi.address
     assert the_instance_entry['volttron-home'] == vi.volttron_home
 
 
