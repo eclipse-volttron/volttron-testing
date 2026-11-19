@@ -33,6 +33,7 @@ import time
 import uuid
 from configparser import ConfigParser
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import List, Optional, Union
@@ -59,7 +60,7 @@ from volttron.client.known_identities import (
 )
 from volttron.client.vip.agent import Agent
 from volttron.server.aip import AIPplatform
-from volttron.types.agent_context import AgentInstallOptions, AgentOptions
+from volttron.types.agent_context import AgentOptions
 from volttron.types.auth import Authenticator, PKICredentials, VolttronCredentials
 from volttron.types.auth.auth_service import AuthService
 from volttron.types.server_config import ServerConfig, ServiceConfigs
@@ -87,6 +88,22 @@ from volttrontesting.utils import (
     get_rand_tcp_address,
     get_rand_vip,
 )
+
+
+
+@dataclass
+class InstallAgentOptions:
+    """Options for ``PlatformWrapper.install_agent``."""
+    start: bool = False
+    vip_identity: Optional[str] = None
+    agent_config: Optional[Union[dict, str]] = None
+    startup_time: int = 5
+    force: bool = False
+
+    # Additional options for compatibility
+    tag: Optional[str] = None
+    priority: Optional[int] = None
+
 
 _log = logging.getLogger(__name__)
 
@@ -298,6 +315,10 @@ class PlatformWrapper:
         # Initialize mock infrastructure for mock messagebus
         self.mock_config_store = {} if self.messagebus == 'mock' else None
         self.test_server = None  # Will be initialized if mock mode
+        # Every agent build_agent() returned. shutdown_platform() stops them: an agent left running after its platform is
+        # gone keeps reconnecting, and with such agents alive the next instance's agents never connect (seen with the
+        # pubsub and vctl modules, which build agents they do not stop).
+        self._built_agents = []
 
         self.volttron_home = create_volttron_home()
 
@@ -577,6 +598,8 @@ class PlatformWrapper:
 
             if serverkey is None:
                 serverkey = self.serverkey
+            if self.messagebus == 'mock':
+                return self._build_mock_agent(identity, address or self.address, agent_class, should_spawn, **kwargs)
             if publickey is None:
                 if self.messagebus == "zmq":
                     from volttron.auth.zap.credential_store import (
@@ -620,6 +643,7 @@ class PlatformWrapper:
 
             self.logit(f"Using vip-address {address}")
             self.logit(f"Got agent credentials for identity {identity} as {agent_cred}")
+            self._use_zmq_core_builder()
             agent_opts = AgentOptions(heartbeat_autostart=kwargs.pop('heartbeat_autostart', False),
                                       heartbeat_period=kwargs.pop('heartbeat_period', 60),
                                       volttron_home=self.volttron_home,
@@ -628,20 +652,6 @@ class PlatformWrapper:
                                 options=agent_opts, address=address)
             self.logit('platformwrapper.build_agent.address: {}'.format(address))
             
-            # For mock mode with TestServer, connect the agent and set up pubsub interception
-            if self.messagebus == 'mock' and self.test_server:
-                self.test_server.connect_agent(agent)
-                
-                # If using MockAgent, set up test server reference for full VIP functionality
-                if hasattr(agent, 'set_test_server'):
-                    agent.set_test_server(self.test_server)
-                else:
-                    # Set up pubsub interception to route through TestServer for regular agents
-                    from volttrontesting.pubsub_interceptor import intercept_agent_pubsub
-                    intercept_agent_pubsub(agent, self.test_server.__server_pubsub__)
-                    
-                self.logit(f"Connected agent {identity} to TestServer with pubsub interception")
-
             if should_spawn:
                 self.logit(f'platformwrapper.build_agent spawning for identity {identity}')
                 event = gevent.event.Event()
@@ -652,7 +662,75 @@ class PlatformWrapper:
                 self.logit(f'build_agent router_ping done for {identity}: {len(router_ping)} responses')
                 assert len(router_ping) > 0
 
+            self._built_agents.append(agent)
             return agent
+
+    @staticmethod
+    def _use_zmq_core_builder():
+        """Pin core's cached core builder to ``ZmqCoreBuilder`` before building a real agent.
+
+        Importing ``volttrontesting.mock_core_builder`` (which any mock-mode test earlier in the session does) adds a
+        second entry to core's builder registry. From then on ``get_core_builder()`` without a name either cannot choose
+        or, when only the mock is registered, hands a real ``Agent`` a ``MockConnection`` that fails on its first
+        ``send_vip``. Selecting by name makes the zmq path independent of what ran before."""
+        from volttron.client.decorators import get_core_builder, reset_core_builder
+        import volttron.messagebus.zmq.zmq_core    # noqa: F401  registers ZmqCoreBuilder
+        reset_core_builder()
+        get_core_builder(name='ZmqCoreBuilder')
+
+    def _stop_agent_core(self, agent, timeout=5):
+        """Stop an in-process agent's core without touching the bus, and kill whatever is left after ``timeout``.
+
+        ``Core.stop()`` first sends ``agentstop`` to the router; on a DEALER socket whose router is already gone that
+        send never returns (and ``ZmqCore.connected`` is never cleared, its setter is a no-op), so a core stopped the
+        plain way after its platform went down becomes a zombie whose monitor greenlet sits in that send for good.
+        ``platform_shutdown=True`` skips the send. ``MockCore.stop()`` takes no arguments."""
+        core = agent.core
+        name = getattr(core, 'identity', '?')
+        try:
+            core.stop(timeout=timeout, platform_shutdown=True)
+        except TypeError:
+            core.stop()
+        except Exception as e:
+            self.logit(f"stopping {name} raised {e!r}")
+        glt = getattr(core, 'greenlet', None)
+        if glt is not None and not glt.ready():
+            self.logit(f"core greenlet of {name} did not finish; killing it")
+            glt.kill(block=True, timeout=timeout)
+        for g in list(getattr(core, 'spawned_greenlets', ())):
+            if not g.ready():
+                g.kill(block=False)
+
+    def _stop_built_agents(self):
+        """Stop every agent this wrapper built (not ``dynamic_agent``, which shutdown handles itself)."""
+        for agent in self._built_agents:
+            if agent is self.dynamic_agent:    # appended before startup_platform assigned it; shutdown stops it itself
+                continue
+            self._stop_agent_core(agent)
+        self._built_agents = []
+
+    def _build_mock_agent(self, identity, address, agent_class, should_spawn, **kwargs):
+        """``messagebus='mock'``: no platform process and no credentials; the agent is a ``MockAgent`` (unless a class was
+        given) wired to this wrapper's ``TestServer``."""
+        if agent_class is None or agent_class is Agent:
+            from volttrontesting.mock_agent import MockAgent
+            agent_class = MockAgent
+        agent = agent_class(identity=identity, address=address, message_bus='mock', volttron_home=self.volttron_home,
+                            **kwargs)
+        if self.test_server:
+            self.test_server.connect_agent(agent)
+            if hasattr(agent, 'set_test_server'):
+                agent.set_test_server(self.test_server)
+            else:
+                from volttrontesting.pubsub_interceptor import intercept_agent_pubsub
+                intercept_agent_pubsub(agent, self.test_server.__server_pubsub__)
+            self.logit(f"Connected agent {identity} to TestServer")
+        if should_spawn:
+            event = gevent.event.Event()
+            gevent.spawn(agent.core.run, event)
+            event.wait(timeout=2)
+        self._built_agents.append(agent)
+        return agent
 
     def add_capabilities(self, publickey, capabilities):
         """Capabilities are authz roles on the modular platform; ``auth.json`` and ``AuthFile`` no longer exist.
@@ -823,7 +901,7 @@ class PlatformWrapper:
             #     cmd.append('--msgdebug')
             if enable_logging:
                 cmd.append('-vv')
-            cmd.append('-l{}'.format(self.log_path))
+            cmd.extend(['-l', self.log_path])    # two tokens: the server's option pre-scan does not split '-lPATH'
 
 
             # Pre-register dynamic_agent credentials and authz BEFORE the server
@@ -857,7 +935,7 @@ class PlatformWrapper:
             while not has_control and times < 10:
                 times += 1
                 try:
-                    has_control = CONTROL in self.dynamic_agent.vip.peerlist().get(timeout=.2)
+                    has_control = CONTROL in self.dynamic_agent.vip.peerlist().get(timeout=2)
                     self.logit("Has control? {}".format(has_control))
                 except gevent.Timeout:
                     pass
@@ -950,7 +1028,7 @@ class PlatformWrapper:
                       vip_identity: Optional[str] = None,
                       startup_time: int = 5,
                       force: bool = False,
-                      install_options: Optional[AgentInstallOptions] = None):
+                      install_options: Optional[InstallAgentOptions] = None):
         """
         Install and optionally start an agent on the instance.
 
@@ -975,7 +1053,7 @@ class PlatformWrapper:
             Should this overwrite the current or not.
         :return:
         """
-        # If AgentInstallOptions provided, use those values
+        # If InstallAgentOptions provided, use those values
         if install_options:
             start = install_options.start
             vip_identity = install_options.vip_identity or vip_identity
@@ -1415,12 +1493,20 @@ class PlatformWrapper:
     #                                 max_retries=5,
     #                                 env=self.env)
 
-    def restart_platform(self):
+    def stop_platform(self):
+        """Stop the platform process but keep VOLTTRON_HOME, installed agents and credentials, so that
+        ``restart_platform`` can bring the same instance back."""
         with with_os_environ(self.env):
             original_skip_cleanup = self.skip_cleanup
             self.skip_cleanup = True
-            self.shutdown_platform()
-            self.skip_cleanup = original_skip_cleanup
+            try:
+                self.shutdown_platform()
+            finally:
+                self.skip_cleanup = original_skip_cleanup
+
+    def restart_platform(self):
+        with with_os_environ(self.env):
+            self.stop_platform()
             # since this is a restart, we don't want to do an update/overwrite of services.
             self.startup_platform(address=self.address)
             # we would need to reset shutdown flag so that platform is properly cleaned up on the next shutdown call
@@ -1447,15 +1533,20 @@ class PlatformWrapper:
             # Handle mock messagebus shutdown
             if self.messagebus == 'mock':
                 self.logit("Shutting down mock platform")
+                self._stop_built_agents()
                 self.started = False
                 self._instance_shutdown = True
                 if not self.skip_cleanup:
                     self.__remove_home_directory__()
                 return
 
+            self._stop_built_agents()
             if not self.is_running():
                 self.logit(
                     f"Instance running {self.is_running()} and skip cleanup: {self.skip_cleanup}")
+                if self.dynamic_agent is not None:    # the platform died under it; do not leave its core behind
+                    self._stop_agent_core(self.dynamic_agent)
+                    self.dynamic_agent = None
                 if not self.skip_cleanup:
                     self.__remove_home_directory__()
                 return
@@ -1479,12 +1570,11 @@ class PlatformWrapper:
                 try:
                     # don't wait indefinitely as shutdown will not throw an error if RMQ is down/has cert errors
                     self.dynamic_agent.vip.rpc(CONTROL, 'shutdown').get(timeout=10)
-                    self.dynamic_agent.core.stop()
-                    # Wait for the agent greenlet to actually finish so its
-                    # vip_loop/monitor greenlets don't linger into the next test.
-                    self.dynamic_agent.core.greenlet.join(timeout=3)
                 except gevent.Timeout:
                     self.logit("Timeout shutting down platform")
+                # The router is going away (or gone): stop the core without the agentstop send, and make sure none
+                # of its greenlets linger into the next instance.
+                self._stop_agent_core(self.dynamic_agent)
                 self.dynamic_agent = None
 
             if self.p_process is not None:
