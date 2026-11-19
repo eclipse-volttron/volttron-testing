@@ -27,15 +27,13 @@ import socket
 import subprocess
 import time
 from datetime import datetime
-from random import randint
-from random import random
+from random import randint, random
+from unittest import mock
 
 import gevent
-import mock
 import pytest
-
-from volttron.utils import format_timestamp
 from volttron.client.messaging import headers as headers_mod
+from volttron.utils import format_timestamp
 
 
 def is_running_in_container():

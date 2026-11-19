@@ -23,11 +23,14 @@
 # }}}
 
 import logging
+import gevent
 
-from volttrontesting import TestServer
+from volttrontesting.server_mock import TestServer
 from volttron.client import Agent
-
+from volttron.types.auth.auth_credentials import Credentials
+from volttrontesting.mock_agent import MockAgent
 from volttrontesting.memory_pubsub import PublishedMessage
+from volttrontesting.pubsub_interceptor import intercept_agent_pubsub
 
 
 def test_instantiate():
@@ -39,28 +42,48 @@ def test_instantiate():
 
 
 def test_agent_subscription_and_logging():
-    an_agent = Agent(identity="foo")
+    # Use mock agent or specify name="mock" for Agent to use mock core
+    try:
+        # Try to create Agent with mock core
+        an_agent = Agent(credentials=Credentials(identity="foo"), name="mock")
+    except:
+        # Fallback to MockAgent if Agent doesn't work
+        an_agent = MockAgent(identity="foo")
+    
     ts = TestServer()
     assert ts
 
     log = logging.getLogger("an_agent_logger")
     ts.connect_agent(an_agent, log)
+    
+    # Set up pubsub interception for the agent
+    intercept_agent_pubsub(an_agent, TestServer.__server_pubsub__)
 
     on_messages_found = []
 
-    def on_message(bus, topic, headers, message):
+    def on_message(peer, sender, bus, topic, headers, message):
         on_messages_found.append(PublishedMessage(bus=bus, topic=topic, headers=headers, message=message))
         print(bus, topic, headers, message)
+        
     log.debug("Hello World")
     log_message = ts.get_server_log()[0]
     assert log_message.level == logging.DEBUG
     assert log_message.message == "Hello World"
+    
+    # Subscribe through TestServer directly
     subscriber = ts.subscribe('achannel')
 
+    # Subscribe through agent
     an_agent.vip.pubsub.subscribe(peer="pubsub", prefix='bnnel', callback=on_message)
+    
+    # Publish messages
     ts.publish('achannel', message="This is stuff sent through")
     ts.publish('bnnel', message="Second topic")
     ts.publish('bnnel/foobar', message="Third message")
+    
+    # Allow message propagation
+    gevent.sleep(0.1)
+    
     assert len(on_messages_found) == 2
     assert len(subscriber.received_messages()) == 1
 

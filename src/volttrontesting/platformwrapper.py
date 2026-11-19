@@ -137,7 +137,7 @@ MODES = (UNRESTRICTED, VERIFY_ONLY, RESOURCE_CHECK_ONLY, RESTRICTED)
 
 VOLTTRON_ROOT = os.environ.get("VOLTTRON_ROOT")
 if not VOLTTRON_ROOT:
-    VOLTTRON_ROOT = '/home/volttron/git/volttron-core' # dirname(dirname(dirname(os.path.realpath(__file__))))
+    VOLTTRON_ROOT = '/home/volttron/git/volttron-core'    # dirname(dirname(dirname(os.path.realpath(__file__))))
 
 VSTART = "volttron"
 VCTRL = "volttron-ctl"
@@ -197,9 +197,9 @@ def create_platform_config_file(message_bus, instance_name, vip_address, agent_m
         os.chmod(config_path, 0o744)
 
 
-def build_vip_address(dest_wrapper, agent):
+def build_address(dest_wrapper, agent):
     """
-    Create a usable vip address with zap parameters embedded in the uri.
+    Create a usable address with zap parameters embedded in the uri.
 
     :param dest_wrapper:PlatformWrapper:
         The destination wrapper instance that the agent will be attempting to
@@ -208,13 +208,15 @@ def build_vip_address(dest_wrapper, agent):
         The agent that is being used to make the connection to dest_wrapper
     :return:
     """
-    return "{}:?serverkey={}&publickey={}&secretkey={}".format(
-        dest_wrapper.vip_address, dest_wrapper.publickey,
-        agent.core.publickey, agent.core.secretkey
-    )
+    return "{}:?serverkey={}&publickey={}&secretkey={}".format(dest_wrapper.address,
+                                                               dest_wrapper.publickey,
+                                                               agent.core.publickey,
+                                                               agent.core.secretkey)
 
 
-def start_wrapper_platform(wrapper, with_http=False, with_tcp=True,
+def start_wrapper_platform(wrapper,
+                           with_http=False,
+                           with_tcp=True,
                            volttron_central_address=None,
                            volttron_central_serverkey=None,
                            add_local_vc_address=False):
@@ -283,7 +285,7 @@ class PlatformWrapper:
         Creates a temporary VOLTTRON_HOME directory with a packaged directory
         for agents that are built.
 
-        :param messagebus: rmq or zmq
+        :param messagebus: rmq or zmq - determines which dependencies to install
         :param ssl_auth: if message_bus=rmq, authenticate users if True
         """
 
@@ -291,6 +293,14 @@ class PlatformWrapper:
         # multiple times.  For example if a fixture calls shutdown and a
         # lower level fixture calls shutdown, this won't hang.
         self._instance_shutdown = False
+
+        # Determine dependencies based on messagebus type
+        self.messagebus = messagebus if messagebus else 'zmq'
+        self.dependencies = self._determine_dependencies()
+        
+        # Initialize mock infrastructure for mock messagebus
+        self.mock_config_store = {} if self.messagebus == 'mock' else None
+        self.test_server = None  # Will be initialized if mock mode
 
         self.volttron_home = create_volttron_home()
 
@@ -339,7 +349,7 @@ class PlatformWrapper:
             'DEBUG': os.environ.get('DEBUG', ''),
             'SKIP_CLEANUP': os.environ.get('SKIP_CLEANUP', ''),
             'PATH': path,
-            # Elixir (rmq pre-req) requires locale to be utf-8
+        # Elixir (rmq pre-req) requires locale to be utf-8
             'LANG': "en_US.UTF-8",
             'LC_ALL': "en_US.UTF-8",
             'PYTHONDONTWRITEBYTECODE': '1',
@@ -381,8 +391,8 @@ class PlatformWrapper:
         self.p_process = None
 
         self.started_agent_pids = []
-        self.local_vip_address = None
-        self.vip_address = None
+        self.local_address = None
+        self.address = None
         self.logit('Creating platform wrapper')
 
         # Added restricted code properties
@@ -620,6 +630,20 @@ class PlatformWrapper:
             agent = agent_class(credentials=agent_cred,
                                 options=agent_opts, address=address)
             self.logit('platformwrapper.build_agent.address: {}'.format(address))
+            
+            # For mock mode with TestServer, connect the agent and set up pubsub interception
+            if self.messagebus == 'mock' and self.test_server:
+                self.test_server.connect_agent(agent)
+                
+                # If using MockAgent, set up test server reference for full VIP functionality
+                if hasattr(agent, 'set_test_server'):
+                    agent.set_test_server(self.test_server)
+                else:
+                    # Set up pubsub interception to route through TestServer for regular agents
+                    from volttrontesting.pubsub_interceptor import intercept_agent_pubsub
+                    intercept_agent_pubsub(agent, self.test_server.__server_pubsub__)
+                    
+                self.logit(f"Connected agent {identity} to TestServer with pubsub interception")
 
             if should_spawn:
                 self.logit(f'platformwrapper.build_agent spawning for identity {identity}')
@@ -634,6 +658,10 @@ class PlatformWrapper:
             return agent
 
     def add_capabilities(self, publickey, capabilities):
+        if not AuthFile:
+            self.logit("AuthFile not available, skipping add_capabilities")
+            return
+
         with with_os_environ(self.env):
             if isinstance(capabilities, str) or isinstance(capabilities, dict):
                 capabilities = [capabilities]
@@ -663,8 +691,9 @@ class PlatformWrapper:
         elif isinstance(entry, dict):
             capabilites.update(entry)
         else:
-            raise ValueError("Invalid capability {}. Capability should be string or dictionary or list of string"
-                             "and dictionary.")
+            raise ValueError(
+                "Invalid capability {}. Capability should be string or dictionary or list of string"
+                "and dictionary.")
 
     def startup_platform(self, vip_address,
                          mode=UNRESTRICTED,
@@ -679,11 +708,71 @@ class PlatformWrapper:
         # in correct home director. Without this when more than one test instance are created, get_home()
         # will return home dir of last started platform wrapper instance.
         with with_os_environ(self.env):
+            # For mock messagebus, we don't need a real platform running
+            if self.messagebus == 'mock':
+                self.address = address
+                self.logit("Mock platform startup - simulating platform without actual process")
+                
+                # Create TestServer for handling pubsub in mock mode
+                from volttrontesting.server_mock import TestServer
+                self.test_server = TestServer()
+                self.logit("Created TestServer for mock pubsub handling")
+                
+                # Create platform credentials for mock mode
+                cred_dir = Path(self.volttron_home) / "credentials_store"
+                cred_dir.mkdir(exist_ok=True)
+                platform_cred = cred_dir / "platform.json"
+                
+                # Generate dummy keys for platform
+                platform_public = str(uuid.uuid4())
+                platform_secret = str(uuid.uuid4())
+                
+                platform_data = {
+                    "identity": "platform",
+                    "domain": None,
+                    "address": self.address,
+                    "serverkey": platform_public,
+                    "publickey": platform_public,
+                    "secretkey": platform_secret
+                }
+                
+                with open(platform_cred, 'w') as f:
+                    jsonapi.dump(platform_data, f)
+                
+                # Set serverkey for mock mode
+                self.serverkey = platform_public
+                
+                # Update config file with address for mock mode
+                config_path = os.path.join(self.volttron_home, "config")
+                if os.path.exists(config_path):
+                    config = ConfigParser()
+                    config.read(config_path)
+                    if not config.has_option("volttron", "address"):
+                        config.set("volttron", "address", address)
+                        with open(config_path, "w") as configfile:
+                            config.write(configfile)
+                
+                # Set up minimal required attributes for mock mode
+                self.p_process = None
+                self.t_process = None
+                self.started = True
+                return
+                
             # Add check and raise error if the platform is already running for this instance.
             if self.is_running():
                 raise PlatformWrapperError("Already running platform")
 
-            self.vip_address = vip_address
+            self.address = address
+
+            # Update config file with the address now that we know it
+            config_path = os.path.join(self.volttron_home, "config")
+            if os.path.exists(config_path):
+                config = ConfigParser()
+                config.read(config_path)
+                if not config.has_option("volttron", "address"):
+                    config.set("volttron", "address", address)
+                    with open(config_path, "w") as configfile:
+                        config.write(configfile)
             self.mode = mode
 
             msgdebug = self.env.get('MSG_DEBUG', False)
@@ -750,6 +839,8 @@ class PlatformWrapper:
                     yaml.dump(self.services, fp)
 
             cmd = [self.volttron_exe]
+            cmd.append('--messagebus')
+            cmd.append(self.messagebus)
             # if msgdebug:
             #     cmd.append('--msgdebug')
             if enable_logging:
@@ -814,6 +905,10 @@ class PlatformWrapper:
             self._instance_shutdown = False
 
     def is_running(self):
+        # For mock messagebus, check if we've "started" it
+        if self.messagebus == 'mock':
+            return getattr(self, 'started', False)
+            
         with with_os_environ(self.env):
             return is_volttron_running(self.volttron_home)
 
@@ -821,8 +916,7 @@ class PlatformWrapper:
         with with_os_environ(self.env):
             self.__wait_for_control_connection_to_exit__()
 
-            self.logit("VOLTTRON_HOME SETTING: {}".format(
-                self.env['VOLTTRON_HOME']))
+            self.logit("VOLTTRON_HOME SETTING: {}".format(self.env['VOLTTRON_HOME']))
             env = self.env.copy()
             cmd = ['volttron-ctl', '--json', 'install', wheel_file]
             if vip_identity:
@@ -870,13 +964,15 @@ class PlatformWrapper:
 
         return results
 
-    def install_agent(self, agent_wheel: Optional[str] = None,
+    def install_agent(self,
+                      agent_wheel: Optional[str] = None,
                       agent_dir: Optional[str] = None,
                       config_file: Optional[Union[dict, str]] = None,
                       start: bool = True,
                       vip_identity: Optional[str] = None,
                       startup_time: int = 5,
-                      force: bool = False):
+                      force: bool = False,
+                      install_options: Optional[InstallAgentOptions] = None):
         """
         Install and optionally start an agent on the instance.
 
@@ -901,8 +997,18 @@ class PlatformWrapper:
             Should this overwrite the current or not.
         :return:
         """
+        # If InstallAgentOptions provided, use those values
+        if install_options:
+            start = install_options.start
+            vip_identity = install_options.vip_identity or vip_identity
+            config_file = install_options.agent_config or config_file
+            startup_time = install_options.startup_time
+            force = install_options.force
+            
         with with_os_environ(self.env):
-            _log.debug(f"install_agent called with params\nagent_wheel: {agent_wheel}\nagent_dir: {agent_dir}")
+            _log.debug(
+                f"install_agent called with params\nagent_wheel: {agent_wheel}\nagent_dir: {agent_dir}"
+            )
             self.__wait_for_control_connection_to_exit__()
             assert self.is_running(), "Instance must be running to install agent."
             assert agent_wheel or agent_dir, "Invalid agent_wheel or agent_dir."
@@ -946,7 +1052,9 @@ class PlatformWrapper:
                 # if start:
                 #     cmd.extend(["--start"])
                 self.logit(f"Command installation is: {cmd}")
-                stdout = execute_command(cmd, logger=_log, env=self.env,
+                stdout = execute_command(cmd,
+                                         logger=_log,
+                                         env=self.env,
                                          err_prefix="Error installing agent")
                 self.logit(f"RESPONSE FROM INSTALL IS: {stdout}")
                 # Because we are no longer silencing output from the install, the
@@ -958,8 +1066,7 @@ class PlatformWrapper:
                 if match:
                     results = match.group(0)
                 else:
-                    raise ValueError(
-                        "The results were not found in the command output")
+                    raise ValueError("The results were not found in the command output")
                 self.logit("here are the results: {}".format(results))
 
                 #
@@ -1007,7 +1114,12 @@ class PlatformWrapper:
             disconnected = False
             timer_start = time.time()
             while not disconnected:
-                peers = self.dynamic_agent.vip.peerlist().get(timeout=20)
+                try:
+                    peers = self.dynamic_agent.vip.peerlist().get(timeout=10)
+                except gevent.Timeout:
+                    self.logit("peerlist call timed out. Exiting loop. "
+                               "Not waiting for control connection to exit.")
+                    break
                 disconnected = CONTROL_CONNECTION not in peers
                 if disconnected:
                     break
@@ -1024,8 +1136,7 @@ class PlatformWrapper:
     def start_agent(self, agent_uuid):
         with with_os_environ(self.env):
             self.logit('Starting agent {}'.format(agent_uuid))
-            self.logit("VOLTTRON_HOME SETTING: {}".format(
-                self.env['VOLTTRON_HOME']))
+            self.logit("VOLTTRON_HOME SETTING: {}".format(self.env['VOLTTRON_HOME']))
             if not self.is_running():
                 raise PlatformWrapperError("Instance must be running before starting agent")
 
@@ -1049,7 +1160,7 @@ class PlatformWrapper:
             assert 'running' in res
             pidpos = res.index('[') + 1
             pidend = res.index(']')
-            pid = int(res[pidpos: pidend])
+            pid = int(res[pidpos:pidend])
 
             assert psutil.pid_exists(pid), \
                 "The pid associated with agent {} does not exist".format(pid)
@@ -1069,7 +1180,9 @@ class PlatformWrapper:
 
             cmd = [self.vctl_exe]
             cmd.extend(['stop', agent_uuid])
-            res = execute_command(cmd, env=self.env, logger=_log,
+            res = execute_command(cmd,
+                                  env=self.env,
+                                  logger=_log,
                                   err_prefix="Error stopping agent")
             return self.agent_pid(agent_uuid)
 
@@ -1078,6 +1191,106 @@ class PlatformWrapper:
             agent_list = self.dynamic_agent.vip.rpc(CONTROL, 'list_agents').get(timeout=10)
             return agent_list
 
+    def run_command(self, command: List[str], **kwargs) -> str:
+        """
+        Run a command in the platform's environment.
+        
+        For mock messagebus, simulates config store operations without
+        actually running vctl commands.
+        
+        :param command: List of command arguments (e.g., ["vctl", "status"])
+        :param kwargs: Additional arguments to pass to execute_command
+        :return: Command output as string
+        """
+        # Handle mock messagebus - simulate config operations
+        if self.messagebus == 'mock' and command and command[0] in ['vctl', 'volttron-ctl']:
+            return self._handle_mock_vctl_command(command)
+            
+        with with_os_environ(self.env):
+            # Ensure vctl commands use the correct executable
+            if command and command[0] == "vctl":
+                command[0] = self.vctl_exe
+                
+            result = execute_command(command, env=self.env, **kwargs)
+            return result
+    
+    def _handle_mock_vctl_command(self, command: List[str]) -> str:
+        """
+        Handle mock vctl commands for testing without real platform.
+        
+        :param command: vctl command list
+        :return: Simulated command output
+        """
+        if len(command) < 2:
+            return "Mock vctl: command successful"
+            
+        # Handle config store commands
+        if command[1] == "config" and len(command) > 2:
+            if command[2] == "store" and len(command) >= 6:
+                # vctl config store <agent> <config_name> <file> [--json|--csv]
+                agent = command[3]
+                config_name = command[4]
+                
+                # Initialize agent's config store if needed
+                if agent not in self.mock_config_store:
+                    self.mock_config_store[agent] = {}
+                    
+                # Store the config (we'll just track that it was stored)
+                self.mock_config_store[agent][config_name] = {
+                    'stored': True,
+                    'type': 'json' if '--json' in command else 'csv' if '--csv' in command else 'raw'
+                }
+                
+                self.logit(f"Mock config store: Stored {config_name} for {agent}")
+                return f"Mock: Config {config_name} stored for {agent}"
+                
+            elif command[2] == "get" and len(command) >= 5:
+                # vctl config get <agent> <config_name>
+                agent = command[3]
+                config_name = command[4]
+                
+                if agent in self.mock_config_store and config_name in self.mock_config_store[agent]:
+                    return f"Mock: Config {config_name} for {agent}: {self.mock_config_store[agent][config_name]}"
+                return f"Mock: Config {config_name} not found for {agent}"
+                
+        # Handle other vctl commands
+        elif command[1] == "status":
+            return "Mock: Platform running (mock mode)"
+            
+        elif command[1] == "list":
+            return "Mock: No agents installed (mock mode)"
+            
+        # Default response
+        self.logit(f"Mock vctl command: {' '.join(command)}")
+        return f"Mock: Command executed successfully"
+
+    def install_library(self, library_path: Union[str, Path]) -> str:
+        """
+        Install a library (e.g., a driver library) into the platform.
+        
+        :param library_path: Path to the library directory or wheel file
+        :return: Installation result/output
+        """
+        library_path = Path(library_path).resolve()
+        
+        if not library_path.exists():
+            raise ValueError(f"Library path does not exist: {library_path}")
+            
+        with with_os_environ(self.env):
+            self.logit(f"Installing library from {library_path}")
+            
+            # If it's a directory, we need to build/install it
+            if library_path.is_dir():
+                # Use pip to install in editable mode for development
+                cmd = [sys.executable, "-m", "pip", "install", "-e", str(library_path)]
+            else:
+                # If it's a wheel file, install directly
+                cmd = [sys.executable, "-m", "pip", "install", str(library_path)]
+                
+            result = execute_command(cmd, env=self.env, logger=_log)
+            self.logit(f"Library installation complete: {result}")
+            return result
+
     def remove_agent(self, agent_uuid):
         """Remove the agent specified by agent_uuid"""
         with with_os_environ(self.env):
@@ -1085,7 +1298,9 @@ class PlatformWrapper:
             self.__wait_for_control_connection_to_exit__()
             cmd = [self.vctl_exe]
             cmd.extend(['remove', agent_uuid])
-            res = execute_command(cmd, env=self.env, logger=_log,
+            res = execute_command(cmd,
+                                  env=self.env,
+                                  logger=_log,
                                   err_prefix="Error removing agent")
             pid = None
             try:
@@ -1094,7 +1309,8 @@ class PlatformWrapper:
                 self.logit("Runtime error occurred successfully as it was expected")
             finally:
                 if pid is not None:
-                    raise RuntimeError(f"Expected runtime error for looking at removed agent. {agent_uuid}")
+                    raise RuntimeError(
+                        f"Expected runtime error for looking at removed agent. {agent_uuid}")
 
     def remove_all_agents(self):
         with with_os_environ(self.env):
@@ -1102,7 +1318,8 @@ class PlatformWrapper:
                 return
             agent_list = self.dynamic_agent.vip.rpc(CONTROL, 'list_agents').get(timeout=10)
             for agent_props in agent_list:
-                self.dynamic_agent.vip.rpc(CONTROL, 'remove_agent', agent_props['uuid']).get(timeout=10)
+                self.dynamic_agent.vip.rpc(CONTROL, 'remove_agent',
+                                           agent_props['uuid']).get(timeout=10)
                 time.sleep(0.2)
 
     def is_agent_running(self, agent_uuid):
@@ -1122,12 +1339,14 @@ class PlatformWrapper:
         cmd.extend(['status', agent_uuid])
         pid = None
         try:
-            res = execute_command(cmd, env=self.env, logger=_log,
+            res = execute_command(cmd,
+                                  env=self.env,
+                                  logger=_log,
                                   err_prefix="Error getting agent status")
             try:
                 pidpos = res.index('[') + 1
                 pidend = res.index(']')
-                pid = int(res[pidpos: pidend])
+                pid = int(res[pidpos:pidend])
             except:
                 pid = None
         except CalledProcessError as ex:
@@ -1170,8 +1389,7 @@ class PlatformWrapper:
     #
     #     return wheel_path
 
-    def confirm_agent_running(self, agent_name, max_retries=5,
-                              timeout_seconds=2):
+    def confirm_agent_running(self, agent_name, max_retries=5, timeout_seconds=2):
         running = False
         retries = 0
         while not running and retries < max_retries:
@@ -1248,14 +1466,24 @@ class PlatformWrapper:
                 self.logit(f"Instance already shutdown {self._instance_shutdown}")
                 return
 
+            # Handle mock messagebus shutdown
+            if self.messagebus == 'mock':
+                self.logit("Shutting down mock platform")
+                self.started = False
+                self._instance_shutdown = True
+                if not self.skip_cleanup:
+                    self.__remove_home_directory__()
+                return
+
             if not self.is_running():
-                self.logit(f"Instance not running {self.is_running()} and skip cleanup: {self.skip_cleanup}")
+                self.logit(
+                    f"Instance running {self.is_running()} and skip cleanup: {self.skip_cleanup}")
                 if not self.skip_cleanup:
                     self.__remove_home_directory__()
                 return
 
             running_pids = []
-            if self.dynamic_agent:  # because we are not creating dynamic agent in setupmode
+            if self.dynamic_agent:    # because we are not creating dynamic agent in setupmode
                 try:
                     for agnt in self.list_agents():
                         pid = self.agent_pid(agnt['uuid'])
@@ -1265,6 +1493,10 @@ class PlatformWrapper:
                         self.remove_all_agents()
                 except gevent.Timeout:
                     self.logit("Timeout getting list of agents")
+                except RuntimeError as e:
+                    if not self.is_running():
+                        self.logit("Unable to shutdown agent. instance is already shutdown")
+                    self.logit(f"Error shutting down agent {e}")
 
                 try:
                     # don't wait indefinitely as shutdown will not throw an error if RMQ is down/has cert errors
@@ -1332,8 +1564,10 @@ class PlatformWrapper:
             :return:
             """
             _log.debug("Stop RMQ: {}".format(self.volttron_home))
-            cmd = [os.path.join(self.rabbitmq_config_obj.rmq_home, "sbin/rabbitmqctl"), "stop",
-                   "-n", self.rabbitmq_config_obj.node_name]
+            cmd = [
+                os.path.join(self.rabbitmq_config_obj.rmq_home, "sbin/rabbitmqctl"), "stop", "-n",
+                self.rabbitmq_config_obj.node_name
+            ]
             execute_command(cmd, env=self.env)
             gevent.sleep(2)
             _log.info("**Stopped rmq node: {}".format(self.rabbitmq_config_obj.node_name))
@@ -1354,6 +1588,5 @@ def mergetree(src, dst, symlinks=False, ignore=None):
         if os.path.isdir(s):
             mergetree(s, d, symlinks, ignore)
         else:
-            if not os.path.exists(d) or os.stat(src).st_mtime - os.stat(
-                    dst).st_mtime > 1:
+            if not os.path.exists(d) or os.stat(src).st_mtime - os.stat(dst).st_mtime > 1:
                 shutil.copy2(s, d)

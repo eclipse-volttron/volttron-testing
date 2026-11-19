@@ -78,7 +78,7 @@ def __find_lifecycle_methods__(agent_class) -> List[Tuple[LifeCycleMembers, str]
     for lcm in LifeCycleMembers:  # .enum_members().items():
         # Search for @Core.receiver('onstart')
         # handle cases for weird spacing and multiple lines
-        term = f"@Core.receiver\s*\(\s*['\"]{lcm.value}['\"]\s*\)\s*"
+        term = r"@Core.receiver\s*\(\s*['\"]" + lcm.value + r"['\"]\s*\)\s*"
         m = re.search(term, class_source, re.MULTILINE)
 
         # find the actual function following this
@@ -87,8 +87,8 @@ def __find_lifecycle_methods__(agent_class) -> List[Tuple[LifeCycleMembers, str]
             subsource = class_source[m.start():]
             # We know that the receiver is decorated on the function so we know
             # that it starts with def and ends with
-            m2 = re.search("def\s+.*:$", subsource, re.MULTILINE)
-            m3 = re.search("[a-zA-Z_]+[a-zA-Z_0-9]*\(", m2[0], re.MULTILINE)
+            m2 = re.search(r"def\s+.*:$", subsource, re.MULTILINE)
+            m3 = re.search(r"[a-zA-Z_]+[a-zA-Z_0-9]*\(", m2[0], re.MULTILINE)
             # This is the data we truly want so we can look it up on the members
             # to find an instance of the callable method.
             function_name = m2[0][m3.start():m3.end() - 1]
@@ -333,9 +333,21 @@ class PubSubWrapper(SubSystemWrapper):
         return result
 
     def _do_subscribe(self, peer, prefix, callback, bus="", all_platforms=False, persistent_queue=None):
-        anysub = self._test_server.subscribe(prefix, callback=callback)
+        # Wrap callback to convert from TestServer signature to VIP signature
+        def wrapper_callback(topic, headers, message, bus=''):
+            # Call with VIP signature (peer, sender, bus, topic, headers, message)
+            if headers is None:
+                headers = {}
+            sender = headers.get('sender', 'unknown')
+            callback(peer, sender, bus, topic, headers, message)
+        
+        anysub = self._test_server.subscribe(prefix, callback=wrapper_callback)
         subscription = Subscription(prefix, callback=callback, anysub_subscriber=anysub)
         if prefix in self._subscriptions:
             self._subscriptions[prefix].append(subscription)
         else:
             self._subscriptions[prefix] = [subscription]
+        # Return an AsyncResult for compatibility
+        result = AsyncResult()
+        result.set(subscription)
+        return result

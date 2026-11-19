@@ -24,21 +24,24 @@
 
 import json
 
-from volttron.client import Agent
 from volttron.client.messaging.health import Status, STATUS_BAD
 
-from volttrontesting import TestClient, TestServer
+from volttrontesting import TestServer
+from volttrontesting.mock_agent import MockAgent
 
 
 def test_send_alert():
     """ Test that an agent can send an alert through the pubsub message bus."""
 
-    # Create an agent to run the test with
-    agent = Agent(identity='test-health')
+    # Create a mock agent for testing (doesn't require full VOLTTRON platform)
+    agent = MockAgent(identity='test-health')
 
     # Create the server and connect the agent with the server
     ts = TestServer()
     ts.connect_agent(agent=agent)
+    
+    # Set up the test server for the mock agent
+    agent.set_test_server(ts)
 
     # The health.send_alert should send a pubsub message through the message bus
     agent.vip.health.send_alert("my_alert", Status.build(STATUS_BAD, "no context"))
