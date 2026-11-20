@@ -76,7 +76,7 @@ authors = ["VOLTTRON Team"]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
-volttron = ">=10.0.3a9,<11.0"
+volttron-core = ">=2.0.0rc16"
 
 [tool.poetry.scripts]
 test-agent = "testagent.agent:main"
@@ -132,7 +132,6 @@ def test_peerlist_with_connection(volttron_instance: PlatformWrapper):
         assert peers == expected_peers
 
 
-@pytest.mark.skip(reason="fix vctl list")
 @pytest.mark.control
 def test_no_connection():
     # Test command that doesn't need instance running.
@@ -336,7 +335,6 @@ def test_install_arg_matrix(volttron_instance: PlatformWrapper, args: List, use_
         volttron_instance.remove_all_agents()
 
 
-@pytest.mark.skip(message="issue #146. vctl list fails")
 @pytest.mark.control
 def test_agent_filters(volttron_instance):
     global test_agent_dir
