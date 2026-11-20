@@ -24,6 +24,7 @@
 
 import configparser as configparser
 import logging
+import dataclasses
 import os
 import re
 import shutil
@@ -651,10 +652,14 @@ class PlatformWrapper:
 
             self.logit(f"Using vip-address {address}")
             self.logit(f"Got agent credentials for identity {identity} as {agent_cred}")
+            # Any other AgentOptions field (tag_refresh_interval, tag_vip_id, reconnect_interval, ...) passes through;
+            # dropping them silently made agents ignore the options a test asked for.
+            option_names = {f.name for f in dataclasses.fields(AgentOptions)} - {'volttron_home'}
             agent_opts = AgentOptions(heartbeat_autostart=kwargs.pop('heartbeat_autostart', False),
                                       heartbeat_period=kwargs.pop('heartbeat_period', 60),
                                       volttron_home=self.volttron_home,
-                                      enable_store=kwargs.pop('enable_store', False))
+                                      enable_store=kwargs.pop('enable_store', False),
+                                      **{k: kwargs.pop(k) for k in list(kwargs) if k in option_names})
             with self._zmq_core_builder():
                 agent = agent_class(credentials=agent_cred,
                                     options=agent_opts, address=address)
