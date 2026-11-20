@@ -111,6 +111,15 @@ def __execute_lifecycle_method__(identity: str,
     return ServerResponse(identity, fn.__name__, resp)
 
 
+def _identity_of(identity_or_agent) -> str:
+    """The identity string for a string, a core ``Agent`` or anything with a ``core.identity`` (``MockAgent`` does not
+    subclass ``Agent``)."""
+    if isinstance(identity_or_agent, str):
+        return identity_or_agent
+    core = getattr(identity_or_agent, 'core', None)
+    return core.identity if core is not None else identity_or_agent.identity
+
+
 class TestServer:
     __test__ = False
     __connected_agents__: Dict[str, Agent]
@@ -180,9 +189,7 @@ class TestServer:
         :param identity_or_agent: Agent identity string or Agent instance
         :return: List of scheduled events
         """
-        identity = identity_or_agent
-        if isinstance(identity_or_agent, Agent):
-            identity = identity_or_agent.core.identity
+        identity = _identity_of(identity_or_agent)
         return self.__scheduled_events__.get(identity, [])
 
     def get_periodic_events(self, identity_or_agent: [str, Agent]) -> List[ScheduledEvent]:
@@ -289,9 +296,7 @@ class TestServer:
 
     def __get_lifecycle_members__(self,
                                   identity_or_agent: [str, Agent]) -> Tuple[str, Dict[LifeCycleMembers, Callable]]:
-        identity = identity_or_agent
-        if isinstance(identity_or_agent, Agent):
-            identity = identity_or_agent.core.identity
+        identity = _identity_of(identity_or_agent)
         self.__check_connected__(identity)
         # Make sure there is a setup function defined on the agent.
         members = self.__lifecycle_methods__.get(identity)
@@ -406,9 +411,7 @@ class ServerLogWrapper:
 
     def add_agent_log(self, identity_or_agent: [str, Agent], logger: Logger):
         # TODO modify passed logger to handle the different fn for that
-        identity = identity_or_agent
-        if isinstance(identity_or_agent, Agent):
-            identity = identity_or_agent.core.identity
+        identity = _identity_of(identity_or_agent)
 
         def wrapper(level) -> Callable:
             def fn_wrapper(msg, *args, **kwargs):
