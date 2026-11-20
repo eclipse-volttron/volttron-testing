@@ -289,7 +289,11 @@ def with_os_environ(update_env: dict):
     try:
         yield
     finally:
-        os.environ = copy_env
+        # Restore in place: assigning a plain dict to os.environ would leave every later os.environ write without
+        # putenv (subprocesses would not see them) and without the str-only check that callers rely on.
+        for key in set(os.environ) - set(copy_env):
+            del os.environ[key]
+        os.environ.update(copy_env)
         cc.__volttron_home__ = copy_cc_vhome
 
 
