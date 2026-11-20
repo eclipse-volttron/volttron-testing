@@ -110,25 +110,17 @@ def test_volttron_lib_zmq_management():
     original_zmq_version = get_package_version("volttron-lib-zmq")
     print(f"\nOriginal volttron-lib-zmq version: {original_zmq_version}")
     
-    # Note: volttron-lib-zmq is already installed in this environment
-    # So we test that it's preserved
-    
-    # Ensure it's installed (should detect existing)
+    # Ensure it is installed: detected if the environment already has it, installed otherwise.
     success = manager.ensure_package_installed("volttron-lib-zmq")
     assert success, "Failed to ensure volttron-lib-zmq is installed"
-    
-    current_version = get_package_version("volttron-lib-zmq")
-    print(f"After ensure_installed: {current_version}")
-    
-    # Cleanup should not remove it since it was already installed
+    assert get_package_version("volttron-lib-zmq") is not None
+
+    # Cleanup restores the original state: a preinstalled copy stays, one the manager installed goes.
     manager.cleanup()
-    
     final_version = get_package_version("volttron-lib-zmq")
     print(f"After cleanup: {final_version}")
-    
-    # Should still be installed
-    assert final_version is not None, "volttron-lib-zmq should still be installed"
-    print("✓ volttron-lib-zmq preserved as expected")
+    assert final_version == original_zmq_version, \
+        f"cleanup left volttron-lib-zmq at {final_version}, expected the original {original_zmq_version}"
 
 
 def test_cleanup_on_exception():
