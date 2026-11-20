@@ -323,6 +323,7 @@ class PlatformWrapper:
         # gone keeps reconnecting, and with such agents alive the next instance's agents never connect (seen with the
         # pubsub and vctl modules, which build agents they do not stop).
         self._built_agents = []
+        self._core_builder = None    # this wrapper's ZmqCoreBuilder, see _zmq_core_builder
 
         self.volttron_home = create_volttron_home()
 
@@ -647,13 +648,13 @@ class PlatformWrapper:
 
             self.logit(f"Using vip-address {address}")
             self.logit(f"Got agent credentials for identity {identity} as {agent_cred}")
-            self._use_zmq_core_builder()
             agent_opts = AgentOptions(heartbeat_autostart=kwargs.pop('heartbeat_autostart', False),
                                       heartbeat_period=kwargs.pop('heartbeat_period', 60),
                                       volttron_home=self.volttron_home,
                                       enable_store=False)
-            agent = agent_class(credentials=agent_cred,
-                                options=agent_opts, address=address)
+            with self._zmq_core_builder():
+                agent = agent_class(credentials=agent_cred,
+                                    options=agent_opts, address=address)
             self.logit('platformwrapper.build_agent.address: {}'.format(address))
             
             if should_spawn:
@@ -669,18 +670,27 @@ class PlatformWrapper:
             self._built_agents.append(agent)
             return agent
 
-    @staticmethod
-    def _use_zmq_core_builder():
-        """Pin core's cached core builder to ``ZmqCoreBuilder`` before building a real agent.
+    @contextmanager
+    def _zmq_core_builder(self):
+        """Construct real agents with this wrapper's ``ZmqCoreBuilder``, and leave core's builder cache as it was.
 
-        Importing ``volttrontesting.mock_core_builder`` (which any mock-mode test earlier in the session does) adds a
-        second entry to core's builder registry. From then on ``get_core_builder()`` without a name either cannot choose
-        or, when only the mock is registered, hands a real ``Agent`` a ``MockConnection`` that fails on its first
-        ``send_vip``. Selecting by name makes the zmq path independent of what ran before."""
-        from volttron.client.decorators import get_core_builder, reset_core_builder
+        ``Agent.__init__`` asks ``get_core_builder()`` for the process-wide cached builder. Once a mock-mode test has
+        imported ``volttrontesting.mock_core_builder`` the registry holds two builders, and an unnamed lookup either
+        cannot choose or hands a real agent a ``MockConnection``. The cache also wins over an explicit name, so a
+        builder left in it by one test is what every later agent gets, real or mock (volttron-core#361). The wrapper
+        therefore installs its own zmq builder only for the duration of the constructor and restores the previous
+        cache afterwards; all of a wrapper's agents share that one builder, as its constructor intends."""
+        from volttron.client import decorators
         import volttron.messagebus.zmq.zmq_core    # noqa: F401  registers ZmqCoreBuilder
-        reset_core_builder()
-        get_core_builder(name='ZmqCoreBuilder')
+        previous = decorators.__core_builder__
+        if self._core_builder is None:
+            decorators.__core_builder__ = None
+            self._core_builder = decorators.get_core_builder(name='ZmqCoreBuilder')
+        decorators.__core_builder__ = self._core_builder
+        try:
+            yield
+        finally:
+            decorators.__core_builder__ = previous
 
     def _stop_agent_core(self, agent, timeout=5):
         """Stop an in-process agent's core without touching the bus, and kill whatever is left after ``timeout``.
