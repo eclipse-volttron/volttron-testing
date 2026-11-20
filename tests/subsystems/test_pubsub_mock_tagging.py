@@ -10,6 +10,20 @@ from volttron.client.vip.agent import PubSub
 from volttron.utils import format_timestamp
 
 
+def _until(action, condition, timeout=15.0):
+    """Repeat ``action`` (a publish) about once a second until ``condition`` holds. A subscription made at agent start
+    or just before may not be registered yet, so a single publish can be lost; repeating covers both that and slow
+    delivery. Uses gevent's sleep so the agents keep running."""
+    deadline = gevent.get_hub().loop.now() + timeout
+    while gevent.get_hub().loop.now() < deadline:
+        action()
+        for _ in range(10):
+            if condition():
+                return True
+            gevent.sleep(0.1)
+    return condition()
+
+
 class TestAgentPubsubByTags(Agent):
 
     def __init__(self, **kwargs):
@@ -69,7 +83,7 @@ headers = {
         }
 
 
-def test_subscribe_by_tags_class_method(volttron_instance, test_agents, mocker):
+def test_subscribe_by_tags_class_method(volttron_instance, test_agents):
     pub_agent, agent = test_agents
     try:
         # TestAgent subscribes to "devices/campus/b1/device_test_class_method" tag condition using the
@@ -77,10 +91,11 @@ def test_subscribe_by_tags_class_method(volttron_instance, test_agents, mocker):
 
         # publish to devices and check agent.subscription_results
         # Publish messages
-        pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b1/device_test_class_method/all",
-                                     headers, all_message).get(timeout=10)
+        assert _until(lambda: pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b1/device_test_class_method/all",
+                                                           headers, all_message).get(timeout=10),
+                      lambda: "devices/campus/b1/device_test_class_method/all" in agent.subscription_results)
         pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b1/d2/all", headers, all_message).get(timeout=10)
-        gevent.sleep(0.5)
+        gevent.sleep(0.5)    # d2 must not arrive
 
         assert agent.subscription_results["devices/campus/b1/device_test_class_method/all"]["headers"] == headers
         assert agent.subscription_results["devices/campus/b1/device_test_class_method/all"]["message"] == all_message
@@ -101,10 +116,12 @@ def test_subscribe_by_tags_instance_method(volttron_instance, test_agents):
                                                agent.callback_method).get(timeout=10)
 
             # Publish messages
-            pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b1/device_test_class_method/all", headers,
-                                         all_message).get(timeout=10)
-            pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d2/all", headers, all_message).get(timeout=10)
-            gevent.sleep(0.5)
+            assert _until(lambda: pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b1/device_test_class_method/all",
+                                                               headers, all_message).get(timeout=10),
+                          lambda: "devices/campus/b1/device_test_class_method/all" in agent.subscription_results)
+            assert _until(lambda: pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d2/all", headers,
+                                                               all_message).get(timeout=10),
+                          lambda: "devices/campus/b2/d2/all" in agent.instance_subscription_results)
 
             assert agent.subscription_results["devices/campus/b1/device_test_class_method/all"]["headers"] == headers
             assert agent.subscription_results["devices/campus/b1/device_test_class_method/all"][
@@ -130,8 +147,9 @@ def test_subscribe_by_tags_refresh_tags(volttron_instance, test_agents):
             agent.vip.pubsub.subscribe_by_tags('pubsub', "condition_devices/campus/b2",
                                                agent.callback_method, topic_source="").get(timeout=5)
             # Publish messages
-            pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d2/all", headers, all_message).get(timeout=10)
-            gevent.sleep(0.5)
+            assert _until(lambda: pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d2/all", headers,
+                                                               all_message).get(timeout=10),
+                          lambda: "devices/campus/b2/d2/all" in agent.instance_subscription_results)
 
             assert agent.instance_subscription_results["devices/campus/b2/d2/all"]["headers"] == headers
             assert agent.instance_subscription_results["devices/campus/b2/d2/all"]["message"] == all_message
@@ -144,9 +162,10 @@ def test_subscribe_by_tags_refresh_tags(volttron_instance, test_agents):
             # refresh shouldn't have happened
             assert agent.instance_subscription_results.get("devices/campus/b2/d3/all") is None
 
-            gevent.sleep(5)
-            # now refresh should have happened
-            pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d3/all", headers, all_message).get(timeout=10)
+            # once the 5 s refresh has happened, d3 arrives
+            assert _until(lambda: pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d3/all", headers,
+                                                               all_message).get(timeout=10),
+                          lambda: "devices/campus/b2/d3/all" in agent.instance_subscription_results, timeout=20)
             assert agent.instance_subscription_results["devices/campus/b2/d3/all"]["headers"] == headers
             assert agent.instance_subscription_results["devices/campus/b2/d3/all"]["message"] == all_message
     finally:
@@ -164,7 +183,9 @@ def test_unsubscribe_by_tags(volttron_instance, test_agents):
             agent.vip.pubsub.subscribe_by_tags('pubsub', "condition_devices/campus/b2/d3",
                                                agent.callback_method).get(timeout=5)
             # Publish messages
-            pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d3/all", headers, all_message).get(timeout=10)
+            assert _until(lambda: pub_agent.vip.pubsub.publish('pubsub', "devices/campus/b2/d3/all", headers,
+                                                               all_message).get(timeout=10),
+                          lambda: "devices/campus/b2/d3/all" in agent.instance_subscription_results)
 
             assert agent.instance_subscription_results["devices/campus/b2/d3/all"]["headers"] == headers
             assert agent.instance_subscription_results["devices/campus/b2/d3/all"]["message"] == all_message
@@ -191,9 +212,9 @@ def test_publish_by_tags(volttron_instance, test_agents):
 
             # publish by tags. should publish to two topics returned by mock method
             # mock method is returning WITHOUT "devices" prefix similar to tagging service so use default topic_source
-            agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points",
-                                             headers=headers, message=[75.2, {"units": "F"}])
-            gevent.sleep(0.5)
+            assert _until(lambda: agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points",
+                                                                   headers=headers, message=[75.2, {"units": "F"}]),
+                          lambda: "devices/campus/b2/d4/p1" in agent.instance_subscription_results)
             assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["headers"] == headers
             assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["message"] == [75.2, {"units": "F"}]
             agent.reset_results()
@@ -213,10 +234,11 @@ def test_publish_by_tags(volttron_instance, test_agents):
                 assert v.args[0] == 'tag condition tag_condition_device_d4_points matched 2 topics but ' \
                                     'max_publish_count is set to 1'
             # explicitly sending topic_source as empty as mock get_topics_by_tag is returning with "devices" prefix
-            agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points",
-                                             headers=headers, message=[75.2, {"units": "F"}], max_publish_count=2,
-                                             topic_source="")
-            gevent.sleep(1)
+            assert _until(lambda: agent.vip.pubsub.publish_by_tags('pubsub', "tag_condition_device_d4_points",
+                                                                   headers=headers, message=[75.2, {"units": "F"}],
+                                                                   max_publish_count=2, topic_source=""),
+                          lambda: {"devices/campus/b2/d4/p1", "devices/campus/b2/d4/p2"}
+                          <= set(agent.instance_subscription_results))
             assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["headers"] == headers
             assert agent.instance_subscription_results["devices/campus/b2/d4/p1"]["message"] == [75.2, {"units": "F"}]
             assert agent.instance_subscription_results["devices/campus/b2/d4/p2"]["headers"] == headers

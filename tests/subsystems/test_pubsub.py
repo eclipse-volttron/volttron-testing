@@ -65,11 +65,12 @@ def test_publish_from_message_handler(volttron_instance):
 
     # new_agent1.setup_callback("")
 
-    new_agent2.vip.pubsub.publish("pubsub", test_topic, headers={},
-                                  message="Test message").get()
-
-    poll_gevent_sleep(2, lambda: messages_contains_prefix(test_topic,
-                                                          new_agent1.subscription_results))
+    # The handler's subscription is made when the agent starts, so the first publish can precede it: repeat.
+    deadline = gevent.get_hub().loop.now() + 15
+    while not messages_contains_prefix(test_topic, new_agent1.subscription_results) \
+            and gevent.get_hub().loop.now() < deadline:
+        new_agent2.vip.pubsub.publish("pubsub", test_topic, headers={}, message="Test message").get()
+        poll_gevent_sleep(1, lambda: messages_contains_prefix(test_topic, new_agent1.subscription_results))
 
     assert new_agent1.subscription_results[test_topic][
                "message"] == "Test message"
