@@ -651,7 +651,7 @@ class PlatformWrapper:
             agent_opts = AgentOptions(heartbeat_autostart=kwargs.pop('heartbeat_autostart', False),
                                       heartbeat_period=kwargs.pop('heartbeat_period', 60),
                                       volttron_home=self.volttron_home,
-                                      enable_store=False)
+                                      enable_store=kwargs.pop('enable_store', False))
             with self._zmq_core_builder():
                 agent = agent_class(credentials=agent_cred,
                                     options=agent_opts, address=address)
