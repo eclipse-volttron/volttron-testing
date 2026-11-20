@@ -20,7 +20,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
-pytest = "^7.0.0"
+pytest = ">=7.0"
 # mock is built-in for Python 3.3+ as unittest.mock
 anypubsub = "^0.6"
 # todo remove dependency on grequests
@@ -28,10 +28,14 @@ grequests = "^0.6.0"
 volttron-core = ">=2.0.0rc16"
 volttron-lib-auth = ">=2.0.0rc6"
 python-dateutil = "^2.8.2"
-docker = "^6.0.1"
+docker = ">=7.1"    # 6.x fails with requests 2.32+: "Not supported URL scheme http+docker"
 pytest-timeout = "^2.3.1"
 
 [tool.poetry.group.dev.dependencies]
+# The platform-level tests need a message bus. It used to arrive only as a side effect: importing
+# platformwrapper_enhanced (test_package_manager.py) makes the wrapper pip-install it at platform start, which
+# happened to run first under pytest 7 but not under pytest 8+, which collects tests/subsystems/ first.
+volttron-lib-zmq = ">=2.0.0rc12"
 #volttron-core = { path="../volttron-core", develop = true}
 # formatting, quality, tests
 pre-commit = "^2.17.0"

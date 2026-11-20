@@ -24,6 +24,7 @@
 
 import configparser as configparser
 import logging
+import dataclasses
 import os
 import re
 import shutil
@@ -323,6 +324,7 @@ class PlatformWrapper:
         # gone keeps reconnecting, and with such agents alive the next instance's agents never connect (seen with the
         # pubsub and vctl modules, which build agents they do not stop).
         self._built_agents = []
+        self._core_builder = None    # this wrapper's ZmqCoreBuilder, see _zmq_core_builder
 
         self.volttron_home = create_volttron_home()
 
@@ -364,6 +366,9 @@ class PlatformWrapper:
         self.env = {
             'HOME': self.user_home,
             'VOLTTRON_HOME': self.volttron_home,
+            # poetry, run by the platform to install agents, uses this environment (see _prepare_agent_environment)
+            'VIRTUAL_ENV': str(Path(sys.executable).parent.parent),
+            'PYTHON_KEYRING_BACKEND': 'keyring.backends.null.Keyring',
             'MESSAGEBUS': messagebus if messagebus else 'zmq',
             'AGENT_ISOLATION_MODE': "true" if agent_isolation_mode else "false",
             'PACKAGED_DIR': self.packaged_dir,
@@ -647,13 +652,17 @@ class PlatformWrapper:
 
             self.logit(f"Using vip-address {address}")
             self.logit(f"Got agent credentials for identity {identity} as {agent_cred}")
-            self._use_zmq_core_builder()
+            # Any other AgentOptions field (tag_refresh_interval, tag_vip_id, reconnect_interval, ...) passes through;
+            # dropping them silently made agents ignore the options a test asked for.
+            option_names = {f.name for f in dataclasses.fields(AgentOptions)} - {'volttron_home'}
             agent_opts = AgentOptions(heartbeat_autostart=kwargs.pop('heartbeat_autostart', False),
                                       heartbeat_period=kwargs.pop('heartbeat_period', 60),
                                       volttron_home=self.volttron_home,
-                                      enable_store=False)
-            agent = agent_class(credentials=agent_cred,
-                                options=agent_opts, address=address)
+                                      enable_store=kwargs.pop('enable_store', False),
+                                      **{k: kwargs.pop(k) for k in list(kwargs) if k in option_names})
+            with self._zmq_core_builder():
+                agent = agent_class(credentials=agent_cred,
+                                    options=agent_opts, address=address)
             self.logit('platformwrapper.build_agent.address: {}'.format(address))
             
             if should_spawn:
@@ -669,18 +678,42 @@ class PlatformWrapper:
             self._built_agents.append(agent)
             return agent
 
-    @staticmethod
-    def _use_zmq_core_builder():
-        """Pin core's cached core builder to ``ZmqCoreBuilder`` before building a real agent.
+    def _prepare_agent_environment(self):
+        """Give the platform the same poetry setup as ``PlatformCLI``, before its first start in this home.
 
-        Importing ``volttrontesting.mock_core_builder`` (which any mock-mode test earlier in the session does) adds a
-        second entry to core's builder registry. From then on ``get_core_builder()`` without a name either cannot choose
-        or, when only the mock is registered, hands a real ``Agent`` a ``MockConnection`` that fails on its first
-        ``send_vip``. Selecting by name makes the zmq path independent of what ran before."""
-        from volttron.client.decorators import get_core_builder, reset_core_builder
+        The platform installs agents with ``poetry add`` into the poetry project in VOLTTRON_HOME and then checks them
+        with ``pip show``. Without a local ``poetry.toml`` keeping poetry in the running environment, poetry installs
+        elsewhere and the check fails ("Package(s) not found"); without a project pinning the environment, the
+        platform builds one itself and resolving it can upgrade packages under the tests. Kept across restarts.
+        """
+        from volttrontesting.platform_cli import POETRY_LOCAL_CONFIG, environment_project
+        home = Path(self.volttron_home)
+        if not (home / 'poetry.toml').exists():
+            (home / 'poetry.toml').write_text(POETRY_LOCAL_CONFIG)
+        if not (home / 'pyproject.toml').exists():
+            (home / 'pyproject.toml').write_text(environment_project())
+
+    @contextmanager
+    def _zmq_core_builder(self):
+        """Construct real agents with this wrapper's ``ZmqCoreBuilder``, and leave core's builder cache as it was.
+
+        ``Agent.__init__`` asks ``get_core_builder()`` for the process-wide cached builder. Once a mock-mode test has
+        imported ``volttrontesting.mock_core_builder`` the registry holds two builders, and an unnamed lookup either
+        cannot choose or hands a real agent a ``MockConnection``. The cache also wins over an explicit name, so a
+        builder left in it by one test is what every later agent gets, real or mock (volttron-core#361). The wrapper
+        therefore installs its own zmq builder only for the duration of the constructor and restores the previous
+        cache afterwards; all of a wrapper's agents share that one builder, as its constructor intends."""
+        from volttron.client import decorators
         import volttron.messagebus.zmq.zmq_core    # noqa: F401  registers ZmqCoreBuilder
-        reset_core_builder()
-        get_core_builder(name='ZmqCoreBuilder')
+        previous = decorators.__core_builder__
+        if self._core_builder is None:
+            decorators.__core_builder__ = None
+            self._core_builder = decorators.get_core_builder(name='ZmqCoreBuilder')
+        decorators.__core_builder__ = self._core_builder
+        try:
+            yield
+        finally:
+            decorators.__core_builder__ = previous
 
     def _stop_agent_core(self, agent, timeout=5):
         """Stop an in-process agent's core without touching the bus, and kill whatever is left after ``timeout``.
@@ -916,8 +949,12 @@ class PlatformWrapper:
             if self.messagebus == "zmq":
                 self._write_agent_credentials("dynamic_agent", admin=True)
 
-            self.p_process = Popen(cmd, env=self.env, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, universal_newlines=True)
+            self._prepare_agent_environment()
+            # The platform's own output goes to a file beside the log. It used to be piped and never read, so enough
+            # output on stderr (all of it, when the log option was not recognised) could fill the pipe and block it.
+            self._stdout_file = open(Path(self.log_path).with_name('volttron.stdout'), 'a')
+            self.p_process = Popen(cmd, env=self.env, stdout=self._stdout_file,
+                                   stderr=subprocess.STDOUT, universal_newlines=True)
 
             # A None value means that the process is still running.
             # A negative means that the process exited with an error.
@@ -1596,6 +1633,9 @@ class PlatformWrapper:
                     self.logit('Error while removing VOLTTRON PID file {}'.format(pid_file))
             else:
                 self.logit("platform process was null")
+            if getattr(self, '_stdout_file', None) is not None:
+                self._stdout_file.close()
+                self._stdout_file = None
 
             for pid in running_pids:
                 if psutil.pid_exists(pid):
