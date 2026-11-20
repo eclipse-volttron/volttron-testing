@@ -5,9 +5,10 @@ This guide explains how to test agents that use VOLTTRON's scheduling features (
 ## Overview
 
 The TestServer now supports testing agents that use scheduled events, including:
-- **Periodic events** - callbacks that run at regular intervals
-- **Cron events** - callbacks that run on a cron schedule
-- **Time-based events** - callbacks that run at a specific time
+- **Direct scheduling** - one-time callbacks after a delay: `core.schedule(callback, delay)`
+- **Periodic events** - callbacks that run at regular intervals: `core.schedule.periodic(callback, period)`
+- **Cron events** - callbacks that run on a cron schedule: `core.schedule.cron(callback, cron_schedule)`
+- **Time-based events** - callbacks that run at a specific time: `core.schedule.schedule(callback, time)`
 
 ## Basic Usage
 
@@ -26,13 +27,16 @@ class MyAgent(Agent):
     
     @Core.receiver('onstart')
     def onstart(self, sender, **kwargs):
+        # Schedule a one-time callback after a delay
+        self.core.schedule(self.immediate_task, 2.0)  # Run after 2 seconds
+        
         # Schedule a periodic callback every 5 seconds
         self.core.schedule.periodic(self.periodic_task, 5.0)
         
         # Schedule a cron job
         self.core.schedule.cron(self.hourly_task, "0 * * * *")
         
-        # Schedule a one-time event
+        # Schedule at a specific time
         from datetime import datetime, timedelta
         future_time = datetime.now() + timedelta(minutes=30)
         self.core.schedule.schedule(self.future_task, future_time)
