@@ -365,6 +365,9 @@ class PlatformWrapper:
         self.env = {
             'HOME': self.user_home,
             'VOLTTRON_HOME': self.volttron_home,
+            # poetry, run by the platform to install agents, uses this environment (see _prepare_agent_environment)
+            'VIRTUAL_ENV': str(Path(sys.executable).parent.parent),
+            'PYTHON_KEYRING_BACKEND': 'keyring.backends.null.Keyring',
             'MESSAGEBUS': messagebus if messagebus else 'zmq',
             'AGENT_ISOLATION_MODE': "true" if agent_isolation_mode else "false",
             'PACKAGED_DIR': self.packaged_dir,
@@ -670,6 +673,21 @@ class PlatformWrapper:
             self._built_agents.append(agent)
             return agent
 
+    def _prepare_agent_environment(self):
+        """Give the platform the same poetry setup as ``PlatformCLI``, before its first start in this home.
+
+        The platform installs agents with ``poetry add`` into the poetry project in VOLTTRON_HOME and then checks them
+        with ``pip show``. Without a local ``poetry.toml`` keeping poetry in the running environment, poetry installs
+        elsewhere and the check fails ("Package(s) not found"); without a project pinning the environment, the
+        platform builds one itself and resolving it can upgrade packages under the tests. Kept across restarts.
+        """
+        from volttrontesting.platform_cli import POETRY_LOCAL_CONFIG, environment_project
+        home = Path(self.volttron_home)
+        if not (home / 'poetry.toml').exists():
+            (home / 'poetry.toml').write_text(POETRY_LOCAL_CONFIG)
+        if not (home / 'pyproject.toml').exists():
+            (home / 'pyproject.toml').write_text(environment_project())
+
     @contextmanager
     def _zmq_core_builder(self):
         """Construct real agents with this wrapper's ``ZmqCoreBuilder``, and leave core's builder cache as it was.
@@ -926,8 +944,12 @@ class PlatformWrapper:
             if self.messagebus == "zmq":
                 self._write_agent_credentials("dynamic_agent", admin=True)
 
-            self.p_process = Popen(cmd, env=self.env, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, universal_newlines=True)
+            self._prepare_agent_environment()
+            # The platform's own output goes to a file beside the log. It used to be piped and never read, so enough
+            # output on stderr (all of it, when the log option was not recognised) could fill the pipe and block it.
+            self._stdout_file = open(Path(self.log_path).with_name('volttron.stdout'), 'a')
+            self.p_process = Popen(cmd, env=self.env, stdout=self._stdout_file,
+                                   stderr=subprocess.STDOUT, universal_newlines=True)
 
             # A None value means that the process is still running.
             # A negative means that the process exited with an error.
@@ -1606,6 +1628,9 @@ class PlatformWrapper:
                     self.logit('Error while removing VOLTTRON PID file {}'.format(pid_file))
             else:
                 self.logit("platform process was null")
+            if getattr(self, '_stdout_file', None) is not None:
+                self._stdout_file.close()
+                self._stdout_file = None
 
             for pid in running_pids:
                 if psutil.pid_exists(pid):
