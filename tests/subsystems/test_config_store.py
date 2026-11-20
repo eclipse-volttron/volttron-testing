@@ -124,7 +124,7 @@ def test_set_config_json(default_config_test_agent):
 @pytest.mark.config_store
 def test_manage_store_json(default_config_test_agent):
     json_config = """{"value":1}"""
-    default_config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_store',
+    default_config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'set_config',
                                            "config_test_agent", "config", json_config, config_type="json").get()
 
     results = default_config_test_agent.callback_results
@@ -204,7 +204,7 @@ def test_manage_delete_config(default_config_test_agent):
     assert len(results) == 1
     first = results[0]
     assert first == ("config", "NEW", {"value": 1})
-    default_config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_delete_config',
+    default_config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'delete_config',
                                            "config_test_agent", "config").get()
     assert len(results) == 2
     second = results[1]
@@ -239,7 +239,7 @@ def test_manage_delete_store(default_config_test_agent):
     assert len(results) == 1
     first = results[0]
     assert first == ("config", "NEW", {"value": 1})
-    default_config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_delete_store', "config_test_agent").get()
+    default_config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'delete_store', "config_test_agent").get()
     assert len(results) == 2
     second = results[1]
     assert second == ("config", "DELETE", None)
@@ -263,7 +263,7 @@ def test_manage_get_config(config_test_agent):
     config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'set_config',
                                    "config_test_agent", "config", json_config, config_type="json").get()
 
-    config = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_get',
+    config = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'get_config',
                                             "config_test_agent", "config", raw=False).get()
 
     assert config == {"value": 1}
@@ -294,12 +294,12 @@ def test_manage_get_metadata(config_test_agent):
     config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'set_config',
                                    "config_test_agent", "config", json_config, config_type="json").get()
 
-    config = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_get',
+    config = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'get_config',
                                             "config_test_agent", "config", raw=False).get()
 
     assert config == {"value": 1}
 
-    metadata = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_get_metadata',
+    metadata = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'get_metadata',
                                               "config_test_agent", "config").get()
     print(f"Metadata {metadata}")
     assert metadata["type"] == "json"
@@ -325,7 +325,7 @@ def test_manage_get_raw_config(config_test_agent):
     config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'set_config',
                                    "config_test_agent", "config", json_config, config_type="json").get()
 
-    config = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_get',
+    config = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'get_config',
                                             "config_test_agent", "config", raw=True).get()
 
     assert config == json_config
@@ -361,7 +361,7 @@ def test_manage_list_config(config_test_agent):
     config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'set_config',
                                    "config_test_agent", "config3", json_config, config_type="json").get()
 
-    config_list = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_list_configs',
+    config_list = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'list_configs',
                                                  "config_test_agent").get()
 
     assert config_list == ['config1', 'config2', 'config3']
@@ -384,7 +384,7 @@ def test_manage_list_store(config_test_agent):
     config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'set_config',
                                    "config_test_agent", "config1", json_config, config_type="json").get()
 
-    config_list = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'manage_list_stores').get()
+    config_list = config_test_agent.vip.rpc.call(CONFIGURATION_STORE, 'list_stores').get()
 
     assert "config_test_agent" in config_list
 
@@ -612,23 +612,16 @@ def test_config_store_security(volttron_instance, default_config_test_agent):
 
         # This agent should not have access to add, edit or delete config store entries of any other agent
         # default_config_test_agent unless explicitly granted permissions
-        try:
-            json_config = """{"value":1}"""
+        refused = r"can call method platform\.config_store\.{} only with identity=rpc_agent but called with " \
+                  r"identity=config_test_agent"
+        with pytest.raises(jsonrpc.RemoteError, match=refused.format("set_config")):
             agent.vip.rpc.call(CONFIGURATION_STORE, 'set_config', "config_test_agent", "config",
-                               json_config, config_type="json").get()
-        except jsonrpc.RemoteError as e:
-            assert e.message == "User rpc_agent can call method set_config only with " \
-                                "identity=rpc_agent but called with identity=config_test_agent"
-
-        try:
+                               """{"value":1}""", config_type="json").get()
+        with pytest.raises(jsonrpc.RemoteError, match=refused.format("delete_store")):
             agent.vip.rpc.call(CONFIGURATION_STORE, 'delete_store', 'config_test_agent').get()
-        except jsonrpc.RemoteError as e:
-            assert e.message == "User rpc_agent can call method delete_store only with " \
-                                "identity=rpc_agent but called with identity=config_test_agent"
 
         # Should be able to view
-        result = agent.vip.rpc.call(CONFIGURATION_STORE, 'list_configs', "config_test_agent").get()
-        print(result)
+        assert isinstance(agent.vip.rpc.call(CONFIGURATION_STORE, 'list_configs', "config_test_agent").get(), list)
 
     finally:
         agent.core.stop()
