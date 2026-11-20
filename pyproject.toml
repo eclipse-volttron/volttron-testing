@@ -28,7 +28,7 @@ grequests = "^0.6.0"
 volttron-core = ">=2.0.0rc16"
 volttron-lib-auth = ">=2.0.0rc6"
 python-dateutil = "^2.8.2"
-docker = "^6.0.1"
+docker = ">=7.1"    # 6.x fails with requests 2.32+: "Not supported URL scheme http+docker"
 pytest-timeout = "^2.3.1"
 
 [tool.poetry.group.dev.dependencies]
