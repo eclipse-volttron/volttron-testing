@@ -37,13 +37,13 @@ from volttron.utils import execute_command, jsonapi
 from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
 
 # Known volttron-core behaviours these tests check for; the markers are strict, so they fail once core is fixed and
-# then have to be removed. See plans_and_analysis/testing_notes/step4-core-defects.md.
+# then have to be removed.
 VCTL_JSON_PROGRESS_LINE = pytest.mark.xfail(
     raises=json.JSONDecodeError, strict=True,
-    reason="vctl --json install prints a progress line before the JSON document, so its output does not parse")
+    reason="volttron-core#364: vctl --json install prints a progress line before the JSON document")
 VCTL_MISSING_WHEEL_LOOKED_UP_ON_PYPI = pytest.mark.xfail(
     raises=AssertionError, strict=True,
-    reason="vctl install of a .whl path that does not exist reports a PyPI install failure, not an invalid wheel file")
+    reason="volttron-core#365: vctl install of a .whl path that does not exist is treated as a PyPI package")
 
 
 @pytest.fixture(autouse=True)

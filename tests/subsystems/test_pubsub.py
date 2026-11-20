@@ -254,7 +254,7 @@ class TestAgentPubsubByTags2(Agent):
         self.instance_subscription_results = dict()
 
 
-@pytest.mark.skip(reason="volttron-sqlite-tagging needs volttron-lib-tagging, whose only releases (0.1.1a5) require the Monolithic volttron package (>=10.0.3a9,<11); it cannot be installed on the modular platform")
+@pytest.mark.skip(reason="volttron-sqlite-tagging and volttron-lib-tagging are archived; their only releases require the Monolithic volttron package (>=10.0.3a9,<11), so they cannot be installed on the modular platform")
 def test_subscribe_by_tags_with_sqlite_tagging_agent(volttron_instance, tagging_agent):
     tagging_vip, pub_agent = tagging_agent
     gevent.sleep(2)
