@@ -25,7 +25,11 @@
 from __future__ import annotations
 
 import logging
-from queue import Queue, Empty
+from queue import Empty
+
+# A gevent queue: MockCore.loop polls the inbox from a greenlet, and threads are not monkey-patched in the test
+# process, so a threading.Queue.get(timeout=...) would block the gevent hub (and every real agent) on each poll.
+from gevent.queue import Queue
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
 import uuid

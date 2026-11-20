@@ -33,86 +33,55 @@ import time
 import uuid
 from configparser import ConfigParser
 from contextlib import closing, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Optional, Union, List, Dict, Any
+from typing import List, Optional, Union
 
 import gevent
 import gevent.subprocess as subprocess
+import grequests
 import psutil
-
-# import grequests  # Removed - not needed for basic testing
 import yaml
 
+#from volttrontesting.fixtures.cert_fixtures import certs_profile_2
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
+from volttron.auth import auth_service
+from volttron.auth.auth_service import ServerOptions, VolttronAuthService
+from volttron.client.known_identities import (
+    AUTH,
+    CONTROL,
+    CONTROL_CONNECTION,
+    PLATFORM,
+    PLATFORM_WEB,
+    PROCESS_IDENTITIES,
+)
+from volttron.client.vip.agent import Agent
+from volttron.server.aip import AIPplatform
+from volttron.types.agent_context import AgentOptions
+from volttron.types.auth import Authenticator, PKICredentials, VolttronCredentials
+from volttron.types.auth.auth_service import AuthService
 from volttron.types.server_config import ServerConfig, ServiceConfigs
 
 # from volttron.platform import packaging
-from volttron.utils import jsonapi
-
-# from volttron.utils.keystore import encode_key, decode_key  # Removed - ZMQ specific
-from volttrontesting.fixtures.cert_fixtures import certs_profile_2
-
-try:
-    from volttron.utils import execute_command, store_message_bus_config, strip_comments
-except ImportError:
-    strip_comments = None
-    store_message_bus_config = None
-    execute_command = None
-
-try:
-    from volttron.client.known_identities import (
-        CONTROL,
-        CONTROL_CONNECTION,
-        PLATFORM_WEB,
-        PROCESS_IDENTITIES,
-    )
-except ImportError:
-    PLATFORM_WEB = "platform.web"
-    CONTROL = "control"
-    CONTROL_CONNECTION = "control.connection"
-    PROCESS_IDENTITIES = []
-
+from volttron.utils import (
+    ClientContext,
+    execute_command,
+    jsonapi,
+    store_message_bus_config,
+    strip_comments,
+)
 from volttron.utils.certs import Certs
 from volttron.utils.commands import is_volttron_running, wait_for_volttron_startup
 
-try:
-    from volttron.utils.logs import setup_logging
-except ImportError:
-    # Provide a simple logging setup if the volttron logs module is not available
-    import logging
-
-    def setup_logging(level=logging.INFO):
-        logging.basicConfig(level=level)
-
-
-try:
-    from volttron.server.aip import AIPplatform
-except ImportError:
-    AIPplatform = None
-
-# Auth components are no longer used in this version
-AuthFile = None
-AuthEntry = None
-AuthFileEntryAlreadyExists = None
-
-# KeyStore and KnownHostsStore are no longer needed
-KeyStore = None
-KnownHostsStore = None
-
-try:
-    from volttron.client import Agent, Connection
-except ImportError:
-    Agent = None
-    Connection = None
 # from volttrontesting.fixtures.rmq_test_setup import create_rmq_volttron_setup
 # from volttron.utils.rmq_setup import start_rabbit, stop_rabbit
 # from volttron.utils.rmq_setup import setup_rabbitmq_volttron
 from volttron.utils.context import ClientContext as cc
 
+#from volttron.client.vip.agent.connection import Connection
 from volttrontesting.utils import (
     get_hostname_and_random_port,
     get_rand_ip_and_port,
@@ -121,21 +90,21 @@ from volttrontesting.utils import (
 )
 
 
+
 @dataclass
 class InstallAgentOptions:
-    """Options for installing an agent on the platform."""
+    """Options for ``PlatformWrapper.install_agent``."""
     start: bool = False
     vip_identity: Optional[str] = None
     agent_config: Optional[Union[dict, str]] = None
     startup_time: int = 5
     force: bool = False
-    
+
     # Additional options for compatibility
     tag: Optional[str] = None
     priority: Optional[int] = None
 
 
-setup_logging()
 _log = logging.getLogger(__name__)
 
 RESTRICTED_AVAILABLE = False
@@ -202,8 +171,8 @@ class PlatformWrapperError(Exception):
 
 
 # TODO: This partially duplicates functionality in volttron-core.utils.messagebus.py. These should probably be combined.
-def create_platform_config_file(message_bus, instance_name, address, agent_monitor_frequency,
-                                secure_agent_users):
+def create_platform_config_file(message_bus, instance_name, vip_address, agent_monitor_frequency,
+                                agent_isolation_mode):
     # If there is no config file or home directory yet, create volttron_home
     # and config file
     if not instance_name:
@@ -220,11 +189,11 @@ def create_platform_config_file(message_bus, instance_name, address, agent_monit
     if os.path.exists(config_path):
         config = ConfigParser()
         config.read(config_path)
-        config.set("volttron", "message-bus", message_bus)
+        config.set("volttron", "messagebus", message_bus)
         config.set("volttron", "instance-name", instance_name)
-        config.set("volttron", "address", address)
+        config.set("volttron", "address", vip_address)
         config.set("volttron", "agent-monitor-frequency", str(agent_monitor_frequency))
-        config.set("volttron", "secure-agent-users", str(secure_agent_users))
+        config.set("volttron", "agent-isolation-mode", str(agent_isolation_mode))
         with open(config_path, "w") as configfile:
             config.write(configfile)
     else:
@@ -232,11 +201,11 @@ def create_platform_config_file(message_bus, instance_name, address, agent_monit
             os.makedirs(v_home, 0o755)
         config = ConfigParser()
         config.add_section("volttron")
-        config.set("volttron", "message-bus", message_bus)
+        config.set("volttron", "messagebus", message_bus)
         config.set("volttron", "instance-name", instance_name)
-        config.set("volttron", "address", address)
+        config.set("volttron", "address", vip_address)
         config.set("volttron", "agent-monitor-frequency", str(agent_monitor_frequency))
-        config.set("volttron", "secure-agent-users", str(secure_agent_users))
+        config.set("volttron", "agent-isolation-mode", str(agent_isolation_mode))
 
         with open(config_path, "w") as configfile:
             config.write(configfile)
@@ -271,38 +240,8 @@ def start_wrapper_platform(wrapper,
     """
     # Please note, if 'with_http'==True, then instance name needs to be provided
     assert not wrapper.is_running()
-
     address = get_rand_vip()
-    if wrapper.ssl_auth:
-        hostname, port = get_hostname_and_random_port()
-        bind_address = 'https://{hostname}:{port}'.format(hostname=hostname, port=port)
-    else:
-        bind_address = "http://{}".format(get_rand_ip_and_port())
-
-    # Will return https if messagebus rmq
-    # bind_address = get_rand_http_address(wrapper.messagebus == 'rmq') if with_http else None
-    vc_http = bind_address
-    vc_tcp = get_rand_tcp_address() if with_tcp else None
-
-    if add_local_vc_address:
-        # KeyStore no longer used, generate placeholder key
-        if wrapper.ssl_auth is True:
-            volttron_central_address = vc_http
-        else:
-            volttron_central_address = vc_tcp
-            volttron_central_serverkey = "placeholder-serverkey"
-
-    wrapper.startup_platform(address=vc_tcp,
-                             bind_web_address=bind_address,
-                             volttron_central_address=volttron_central_address,
-                             volttron_central_serverkey=volttron_central_serverkey)
-    if with_http:
-        discovery = "{}/discovery/".format(vc_http)
-        # Use urllib instead of grequests for simpler dependency
-        import urllib.request
-        response = urllib.request.urlopen(discovery)
-        assert response.status == 200
-
+    wrapper.startup_platform(address=address)
     assert wrapper.is_running()
 
 
@@ -350,18 +289,17 @@ def with_os_environ(update_env: dict):
     try:
         yield
     finally:
-        os.environ = copy_env
+        # Restore in place: assigning a plain dict to os.environ would leave every later os.environ write without
+        # putenv (subprocesses would not see them) and without the str-only check that callers rely on.
+        for key in set(os.environ) - set(copy_env):
+            del os.environ[key]
+        os.environ.update(copy_env)
         cc.__volttron_home__ = copy_cc_vhome
 
 
 class PlatformWrapper:
-
-    def __init__(self,
-                 messagebus=None,
-                 ssl_auth=False,
-                 instance_name=None,
-                 secure_agent_users=False,
-                 remote_platform_ca=None):
+    def __init__(self, messagebus=None, ssl_auth=False, instance_name=None,
+                 agent_isolation_mode=False, remote_platform_ca=None):
         """ Initializes a new VOLTTRON instance
 
         Creates a temporary VOLTTRON_HOME directory with a packaged directory
@@ -376,15 +314,37 @@ class PlatformWrapper:
         # lower level fixture calls shutdown, this won't hang.
         self._instance_shutdown = False
 
-        # Determine dependencies based on messagebus type
         self.messagebus = messagebus if messagebus else 'zmq'
-        self.dependencies = self._determine_dependencies()
         
         # Initialize mock infrastructure for mock messagebus
         self.mock_config_store = {} if self.messagebus == 'mock' else None
         self.test_server = None  # Will be initialized if mock mode
+        # Every agent build_agent() returned. shutdown_platform() stops them: an agent left running after its platform is
+        # gone keeps reconnecting, and with such agents alive the next instance's agents never connect (seen with the
+        # pubsub and vctl modules, which build agents they do not stop).
+        self._built_agents = []
 
         self.volttron_home = create_volttron_home()
+
+        # Each PlatformWrapper manages its own volttron_home.  The global
+        # service_repo is a module-level singleton whose Singleton entries get
+        # their _resolved cache populated on the first build_agent() call (with
+        # the first wrapper's ServerOptions).  Without a reset, the second
+        # wrapper's build_agent() would receive stale service instances that
+        # still hold references to the first wrapper's volttron_home/paths.
+        # reset_instances() removes those cached live objects and any direct
+        # add_instance() values (ServerOptions etc.) while preserving all
+        # class-factory registrations (@service decorators), so the next
+        # resolve() call builds fresh instances against the new ServerOptions.
+        from volttron.server.containers import service_repo
+        service_repo.reset_instances()
+        # Reset the cached CoreBuilder singleton so a fresh ZmqCoreBuilder is
+        # created for this wrapper.  ZmqCoreBuilder now holds agent_contexts and
+        # connection_builders as instance-level dicts, so a new instance gives
+        # this wrapper a completely isolated context — no stale server addresses
+        # or connection builders from a previous wrapper leak through.
+        from volttron.client.decorators import reset_core_builder
+        reset_core_builder()
         # this is the user home directory that will be used for this instance
         self.user_home = Path(self.volttron_home).parent.resolve().as_posix()
         # log file is one level above volttron_home now
@@ -404,6 +364,8 @@ class PlatformWrapper:
         self.env = {
             'HOME': self.user_home,
             'VOLTTRON_HOME': self.volttron_home,
+            'MESSAGEBUS': messagebus if messagebus else 'zmq',
+            'AGENT_ISOLATION_MODE': "true" if agent_isolation_mode else "false",
             'PACKAGED_DIR': self.packaged_dir,
             'DEBUG_MODE': os.environ.get('DEBUG_MODE', ''),
             'DEBUG': os.environ.get('DEBUG', ''),
@@ -414,8 +376,30 @@ class PlatformWrapper:
             'LC_ALL': "en_US.UTF-8",
             'PYTHONDONTWRITEBYTECODE': '1',
             'VOLTTRON_ROOT': VOLTTRON_ROOT,
+            # Proxy settings — needed for poetry/pip to reach PyPI through corporate proxies.
+            'HTTP_PROXY': os.environ.get('HTTP_PROXY', ''),
+            'http_proxy': os.environ.get('http_proxy', ''),
             'HTTPS_PROXY': os.environ.get('HTTPS_PROXY', ''),
-            'https_proxy': os.environ.get('https_proxy', '')
+            'https_proxy': os.environ.get('https_proxy', ''),
+            'NO_PROXY': os.environ.get('NO_PROXY', ''),
+            'no_proxy': os.environ.get('no_proxy', ''),
+            # SSL certificate bundles — required for HTTPS (PyPI) on systems with
+            # corporate or custom CA certs (e.g. PNNL).  poetry and pip both honour
+            # these; omitting them causes SSL verification failures when the server
+            # subprocess runs "poetry add <agent>" during agent installation.
+            'SSL_CERT_FILE': os.environ.get('SSL_CERT_FILE', ''),
+            'CURL_CA_BUNDLE': os.environ.get('CURL_CA_BUNDLE', ''),
+            'REQUESTS_CA_BUNDLE': os.environ.get('REQUESTS_CA_BUNDLE', ''),
+            'PIP_CERT': os.environ.get('PIP_CERT', ''),
+            # Custom PyPI index (e.g. Artifactory mirror) — pass through so
+            # poetry/pip resolve packages from the same source as the host shell.
+            'PIP_INDEX_URL': os.environ.get('PIP_INDEX_URL', ''),
+            'PIP_EXTRA_INDEX_URL': os.environ.get('PIP_EXTRA_INDEX_URL', ''),
+            # HOME is a temp dir, so point poetry at the real user cache/config or every startup re-resolves from PyPI.
+            'POETRY_CACHE_DIR': os.environ.get('POETRY_CACHE_DIR',
+                                               os.path.expanduser('~/.cache/pypoetry')),
+            'POETRY_CONFIG_DIR': os.environ.get('POETRY_CONFIG_DIR',
+                                                os.path.expanduser('~/.config/pypoetry')),
         }
         self.volttron_root = VOLTTRON_ROOT
         self.vctl_exe = 'volttron-ctl'
@@ -440,18 +424,15 @@ class PlatformWrapper:
         # if the environment variable DEBUG is set to a True value then the
         # instance is not cleaned up.
         self.skip_cleanup = False
-
-        # This is used as command line entry replacement.  Especially working
-        # with older 2.0 agents.
         self.opts = {}
 
         self.services = {}
 
-        # KeyStore is no longer used
-        self.keystore = None
-        self.serverkey = None
-        self.publickey = None
-        self.secure_agent_users = secure_agent_users
+        # keystorefile = os.path.join(self.volttron_home, 'keystore')
+        # self.keystore = KeyStore(keystorefile)
+        # self.keystore.generate()
+        self.messagebus = messagebus if messagebus else 'zmq'
+        self.agent_isolation_mode = agent_isolation_mode
         self.ssl_auth = ssl_auth
         self.instance_name = instance_name
         if not self.instance_name:
@@ -459,11 +440,8 @@ class PlatformWrapper:
 
         with with_os_environ(self.env):
             from volttron.utils import ClientContext
-            if store_message_bus_config:
-                store_message_bus_config(self.messagebus, self.instance_name)
-            else:
-                # Manually create config file if store_message_bus_config is not available
-                self._create_platform_config_manually()
+            # TODO - think below is not needed
+            #store_message_bus_config(self.messagebus, self.instance_name)
             ClientContext.__load_config__()
             # Writes the main volttron config file for this instance.
 
@@ -478,126 +456,126 @@ class PlatformWrapper:
             #                                                          instance_name=self.instance_name,
             #                                                          secure_agent_users=secure_agent_users)
 
-            Path(self.volttron_home).joinpath('certificates').mkdir(exist_ok=True)
-            self.certsobj = Certs()    #Path(self.volttron_home).joinpath("certificates"))
+            # Path(self.volttron_home).joinpath('certificates').mkdir(exist_ok=True)
+            # self.certsobj = Certs()#Path(self.volttron_home).joinpath("certificates"))
 
-            self.debug_mode = self.env.get('DEBUG_MODE', False)
+            self.debug_mode = self.env.get('DEBUG_MODE', True)
             if not self.debug_mode:
-                self.debug_mode = self.env.get('DEBUG', False)
+                self.debug_mode = self.env.get('DEBUG', True)
             self.skip_cleanup = self.env.get('SKIP_CLEANUP', False)
             self.server_config = ServerConfig()
 
-    def get_identity_keys(self, identity: str):
-        # KeyStore is no longer used, return empty dict
-        return {}
 
     def logit(self, message):
         print('{}: {}'.format(self.volttron_home, message))
 
-    def add_service_config(self, service_name, enabled=True, **kwargs):
-        """Add a configuration for an existing service to be configured.
+    def _write_agent_credentials(self, identity: str, admin: bool = False):
+        """Write credentials and authz for *identity* directly to disk.
 
-        This must be called before the startup_platform method in order
-        for it to have any effect.  kwargs will be transferred into the service_config.yml
-        file under the service_name passed.
+        This is the bootstrap path used when no dynamic_agent is connected
+        (e.g. pre-registering before the server starts, or building the first
+        agent).  If credentials already exist for *identity* they are reused;
+        only missing credentials are created.  Returns the Credentials object.
         """
-        service_names = self.get_service_names()
-        assert service_name in service_names, f"Only discovered services can be configured: {service_names}."
-        self.services[service_name] = {}
-        self.services[service_name]["enabled"] = enabled
-        self.services[service_name]["kwargs"] = kwargs
+        import volttron.types.auth.authz_types as _authz
+        from volttron.auth.authz_manager import VolttronAuthzManager
+        from volttron.auth.zap.credential_store import FileBasedCredentialStore
+        from volttron.auth.zap.credentials_creator import VolttronCredentialsCreator
+        from volttron.types.auth.auth_credentials import IdentityNotFound
 
-    def get_service_names(self):
-        """Retrieve the names of services available to configure.
-        """
-        services = ServiceConfigs(
-            Path(self.volttron_home).joinpath("service_config.yml"), ServerConfig())
-        return services.get_service_names()
+        vhome = Path(self.volttron_home)
+        cred_store = FileBasedCredentialStore(
+            credentials_store_repository=vhome / "credentials_store"
+        )
+        try:
+            cred = cred_store.retrieve_credentials(identity=identity)
+            self.logit(f"Credentials already exist for {identity}")
+        except (IdentityNotFound, KeyError):
+            cred = VolttronCredentialsCreator().create(identity)
+            cred_store.store_credentials(credentials=cred)
+            self.logit(f"Created credentials for {identity}")
+        authz_mgr = VolttronAuthzManager(options=ServerOptions(volttron_home=vhome))
+        admin_caps = {}
+        if admin:
+            # Same as the server's "admin" role, inlined because that role isn't created until the server starts.
+            admin_caps = dict(
+                rpc_capabilities=_authz.RPCCapabilities([_authz.RPCCapability(resource="/.*/")]),
+                pubsub_capabilities=_authz.PubsubCapabilities(
+                    [_authz.PubsubCapability(topic_pattern="/.*/", topic_access="pubsub")]),
+            )
+        authz_mgr.create_or_merge_agent_authz(
+            identity=identity,
+            agent_roles=_authz.AgentRoles([
+                _authz.AgentRole(
+                    "default_rpc_capabilities",
+                    param_restrictions={"identity": identity}
+                )
+            ]),
+            comments=f"Registered by PlatformWrapper for {identity}",
+            **admin_caps
+        )
+        return cred
 
-    def allow_all_connections(self):
-        """ Add a /.*/ entry to the auth.json file.
-        """
-        if not AuthFile or not AuthEntry:
-            self.logit("AuthFile/AuthEntry not available, skipping allow_all_connections")
-            return
-
-        with with_os_environ(self.env):
-            entry = AuthEntry(credentials="/.*/", comments="Added by platformwrapper")
-            authfile = AuthFile(self.volttron_home + "/auth.json")
-            try:
-                authfile.add(entry)
-            except AuthFileEntryAlreadyExists:
-                pass
-
-    def get_agent_identity(self, agent_uuid):
-        identity = None
-        path = os.path.join(self.volttron_home, 'agents/{}/IDENTITY'.format(agent_uuid))
-        with open(path) as f:
-            identity = f.read().strip()
-        return identity
+    # def get_agent_identity(self, agent_uuid):
+    #     identity = None
+    #     path = os.path.join(self.volttron_home, 'agents/{}/IDENTITY'.format(agent_uuid))
+    #     with open(path) as f:
+    #         identity = f.read().strip()
+    #     return identity
 
     def get_agent_by_identity(self, identity):
         for agent in self.list_agents():
             if agent.get('identity') == identity:
                 return agent
 
-    def build_connection(self,
-                         peer=None,
-                         address=None,
-                         identity=None,
-                         publickey=None,
-                         secretkey=None,
-                         serverkey=None,
-                         capabilities: Optional[dict] = None,
-                         **kwargs):
-        self.logit('Building connection to {}'.format(peer))
-        with with_os_environ(self.env):
-            self.allow_all_connections()
+    # def build_connection(self, peer=None, address=None, identity=None,
+    #                      publickey=None, secretkey=None, serverkey=None,
+    #                      capabilities: Optional[dict] = None, **kwargs):
+    #     self.logit('Building connection to {}'.format(peer))
+    #     with with_os_environ(self.env):
+    #         self.allow_all_connections()
 
-            if identity is None:
-                # Set identity here instead of AuthEntry creating one and use that identity to create Connection class.
-                # This is to ensure that RMQ test cases get the correct current user that matches the auth entry made
-                identity = str(uuid.uuid4())
-            if address is None:
-                self.logit('Default address was None so setting to current instances')
-                address = self.address
-                serverkey = self.serverkey
-            if serverkey is None:
-                self.logit("serverkey wasn't set but the address was.")
-                raise Exception("Invalid state.")
+    #         if identity is None:
+    #             # Set identity here instead of AuthEntry creating one and use that identity to create Connection class.
+    #             # This is to ensure that RMQ test cases get the correct current user that matches the auth entry made
+    #             identity = str(uuid.uuid4())
+    #         if address is None:
+    #             self.logit(
+    #                 'Default address was None so setting to current instances')
+    #             address = self.vip_address
+    #             serverkey = self.serverkey
+    #         if serverkey is None:
+    #             self.logit("serverkey wasn't set but the address was.")
+    #             raise Exception("Invalid state.")
 
-            if publickey is None or secretkey is None:
-                self.logit(
-                    'generating new public secret key pair - skipping as KeyStore no longer used')
-                # Generate dummy keys for compatibility
-                import uuid
-                publickey = str(uuid.uuid4())
-                secretkey = str(uuid.uuid4())
+    #         if publickey is None or secretkey is None:
+    #             self.logit('generating new public secret key pair')
+    #             keyfile = tempfile.mktemp(".keys", "agent", self.volttron_home)
+    #             keys = KeyStore(keyfile)
+    #             keys.generate()
+    #             publickey = keys.public
+    #             secretkey = keys.secret
 
-                if AuthEntry and AuthFile:
-                    entry = AuthEntry(capabilities=capabilities,
-                                      comments="Added by test",
-                                      credentials=keys.public,
-                                      user_id=identity,
-                                      identity=identity)
-                    file = AuthFile(self.volttron_home + "/auth.json")
-                    file.add(entry)
+    #             entry = AuthEntry(capabilities=capabilities,
+    #                               comments="Added by test",
+    #                               credentials=keys.public,
+    #                               user_id=identity,
+    #                               identity=identity)
+    #             file = AuthFile(self.volttron_home + "/auth.json")
+    #             file.add(entry)
 
-            # Connection is no longer used in the new architecture
-            # Return None for now as Connection functionality might be integrated into Agent
-            self.logit("Connection class is deprecated, returning None")
-            return None
+    #         conn = Connection(address=address, peer=peer, publickey=publickey,
+    #                           secretkey=secretkey, serverkey=serverkey,
+    #                           instance_name=self.instance_name,
+    #                           message_bus=self.messagebus,
+    #                           volttron_home=self.volttron_home,
+    #                           identity=identity)
 
-    def build_agent(self,
-                    address=None,
-                    should_spawn=True,
-                    identity=None,
-                    publickey=None,
-                    secretkey=None,
-                    serverkey=None,
-                    agent_class=None,
-                    capabilities: Optional[dict] = None,
-                    **kwargs):
+    #         return conn
+
+    def build_agent(self, address=None, should_spawn=True, identity=None,
+                    publickey=None, secretkey=None, serverkey=None,
+                    agent_class=Agent, capabilities: Optional[dict] = None, **kwargs) -> Agent:
         """ Build an agent connnected to the passed bus.
 
         By default the current instance that this class wraps will be the
@@ -624,172 +602,146 @@ class PlatformWrapper:
 
             if serverkey is None:
                 serverkey = self.serverkey
+            if self.messagebus == 'mock':
+                return self._build_mock_agent(identity, address or self.address, agent_class, should_spawn, **kwargs)
             if publickey is None:
-                self.logit(
-                    'generating new public secret key pair - skipping as KeyStore no longer used')
-                # Generate dummy keys for compatibility
-                publickey = str(uuid.uuid4())
-                secretkey = str(uuid.uuid4())
+                if self.messagebus == "zmq":
+                    from volttron.auth.zap.credential_store import (
+                        FileBasedCredentialStore,
+                    )
+                else:
+                    raise NotImplementedError(
+                        f"build_agent not yet implemented for messagebus: {self.messagebus}"
+                    )
+
+                volttron_home_path = Path(self.volttron_home)
+                cred_store = FileBasedCredentialStore(
+                    credentials_store_repository=volttron_home_path / "credentials_store"
+                )
+
+                if self.dynamic_agent is not None:
+                    # A connected dynamic_agent already exists — delegate to the
+                    # server's live AuthService via RPC.  This is the preferred
+                    # path because it updates the server's in-memory credential
+                    # and authz maps immediately (no file-watch latency, no
+                    # risk of the ZAP authenticator's publickey map being stale).
+                    self.dynamic_agent.vip.rpc.call(
+                        AUTH, 'create_credentials', identity=identity
+                    ).get(timeout=10)
+                    # get_credentials is not @RPC.export, so read the file that
+                    # the server just wrote to get the Credentials object.
+                    agent_cred = cred_store.retrieve_credentials(identity=identity)
+                else:
+                    # Bootstrap path: no connected agent yet (we are creating
+                    # dynamic_agent itself).  Write credentials and authz
+                    # directly to disk so the server's FileBasedCredentialStore
+                    # can pick them up.  We deliberately avoid resolving
+                    # AuthService through service_repo here because that would
+                    # pull in ZapAuthenticator as a constructor dependency,
+                    # binding inproc://zeromq.zap.01 in the test process and
+                    # leaking the socket/greenlet across test runs.
+                    agent_cred = self._write_agent_credentials(identity)
 
             if address is None:
-                self.logit('Using address {address}'.format(address=self.address))
                 address = self.address
 
-            if publickey and not serverkey:
-                self.logit('using instance serverkey: {}'.format(publickey))
-                serverkey = publickey
-            self.logit("BUILD agent VOLTTRON HOME: {}".format(self.volttron_home))
-
-            if 'enable_store' not in kwargs:
-                kwargs['enable_store'] = False
-
-            if capabilities is None:
-                capabilities = dict(edit_config_store=dict(identity=identity))
-
-            # Add auth entry for the agent using vctl auth add
-            # Skip auth add for now as control connection credentials aren't being created
-            # This is a known issue with the new architecture
-            self.logit(
-                f"Skipping auth add for {identity} - control connection not implemented yet")
-
-            # allow 2 seconds here for the auth to be updated in auth service
-            # before connecting to the platform with the agent.
-            gevent.sleep(2)
-            
-            # For mock mode, always use MockAgent unless a specific agent_class is provided
-            if self.messagebus == 'mock' and agent_class is None:
-                from volttrontesting.mock_agent import MockAgent
-                agent_class = MockAgent
-                
-            # Make sure we have an agent class (for non-mock mode)
-            if agent_class is None:
-                agent_class = Agent
-                
-            if agent_class is None:
-                raise ValueError("No Agent class available. Ensure volttron.client.Agent is installed.")
-            
-            # Set AGENT_VIP_IDENTITY environment variable if using Agent class
-            # This is required by the new Agent class initialization
-            if agent_class == Agent:
-                # Create credentials file for the agent
-                cred_dir = Path(self.volttron_home) / "credentials_store"
-                cred_dir.mkdir(exist_ok=True)
-                cred_file = cred_dir / f"{identity}.json"
-                
-                # Create basic credentials
-                credentials_data = {
-                    "identity": identity,
-                    "domain": None,
-                    "address": address,
-                    "serverkey": serverkey,
-                    "publickey": publickey,
-                    "secretkey": secretkey
-                }
-                
-                with open(cred_file, 'w') as f:
-                    jsonapi.dump(credentials_data, f)
-                
-                # Set environment variable
-                if 'AGENT_VIP_IDENTITY' not in os.environ:
-                    os.environ['AGENT_VIP_IDENTITY'] = identity
-                
-            agent = agent_class(address=address,
-                                identity=identity,
-                                publickey=publickey,
-                                secretkey=secretkey,
-                                serverkey=serverkey,
-                                instance_name=self.instance_name,
-                                volttron_home=self.volttron_home,
-                                message_bus=self.messagebus,
-                                **kwargs)
+            self.logit(f"Using vip-address {address}")
+            self.logit(f"Got agent credentials for identity {identity} as {agent_cred}")
+            self._use_zmq_core_builder()
+            agent_opts = AgentOptions(heartbeat_autostart=kwargs.pop('heartbeat_autostart', False),
+                                      heartbeat_period=kwargs.pop('heartbeat_period', 60),
+                                      volttron_home=self.volttron_home,
+                                      enable_store=False)
+            agent = agent_class(credentials=agent_cred,
+                                options=agent_opts, address=address)
             self.logit('platformwrapper.build_agent.address: {}'.format(address))
             
-            # For mock mode with TestServer, connect the agent and set up pubsub interception
-            if self.messagebus == 'mock' and self.test_server:
-                self.test_server.connect_agent(agent)
-                
-                # If using MockAgent, set up test server reference for full VIP functionality
-                if hasattr(agent, 'set_test_server'):
-                    agent.set_test_server(self.test_server)
-                else:
-                    # Set up pubsub interception to route through TestServer for regular agents
-                    from volttrontesting.pubsub_interceptor import intercept_agent_pubsub
-                    intercept_agent_pubsub(agent, self.test_server.__server_pubsub__)
-                    
-                self.logit(f"Connected agent {identity} to TestServer with pubsub interception")
-
             if should_spawn:
                 self.logit(f'platformwrapper.build_agent spawning for identity {identity}')
                 event = gevent.event.Event()
                 gevent.spawn(agent.core.run, event)
-                event.wait(timeout=2)
-                
-                # Skip ping for mock mode
-                if self.messagebus != 'mock':
-                    router_ping = agent.vip.ping("").get(timeout=30)
-                    assert len(router_ping) > 0
+                connected = event.wait(timeout=15)
+                self.logit(f'build_agent event.wait returned connected={connected} for {identity}')
+                router_ping = agent.vip.ping("").get(timeout=30)
+                self.logit(f'build_agent router_ping done for {identity}: {len(router_ping)} responses')
+                assert len(router_ping) > 0
 
-            agent.publickey = publickey
+            self._built_agents.append(agent)
             return agent
 
-    def _read_auth_file(self):
-        auth_path = os.path.join(self.volttron_home, 'auth.json')
+    @staticmethod
+    def _use_zmq_core_builder():
+        """Pin core's cached core builder to ``ZmqCoreBuilder`` before building a real agent.
+
+        Importing ``volttrontesting.mock_core_builder`` (which any mock-mode test earlier in the session does) adds a
+        second entry to core's builder registry. From then on ``get_core_builder()`` without a name either cannot choose
+        or, when only the mock is registered, hands a real ``Agent`` a ``MockConnection`` that fails on its first
+        ``send_vip``. Selecting by name makes the zmq path independent of what ran before."""
+        from volttron.client.decorators import get_core_builder, reset_core_builder
+        import volttron.messagebus.zmq.zmq_core    # noqa: F401  registers ZmqCoreBuilder
+        reset_core_builder()
+        get_core_builder(name='ZmqCoreBuilder')
+
+    def _stop_agent_core(self, agent, timeout=5):
+        """Stop an in-process agent's core without touching the bus, and kill whatever is left after ``timeout``.
+
+        ``Core.stop()`` first sends ``agentstop`` to the router; on a DEALER socket whose router is already gone that
+        send never returns (and ``ZmqCore.connected`` is never cleared, its setter is a no-op), so a core stopped the
+        plain way after its platform went down becomes a zombie whose monitor greenlet sits in that send for good.
+        ``platform_shutdown=True`` skips the send. ``MockCore.stop()`` takes no arguments."""
+        core = agent.core
+        name = getattr(core, 'identity', '?')
         try:
-            with open(auth_path, 'r') as fd:
-                data = strip_comments(FileObject(fd, close=False).read().decode('utf-8'))
-                if data:
-                    auth = jsonapi.loads(data)
-                else:
-                    auth = {}
-        except IOError:
-            auth = {}
-        if 'allow' not in auth:
-            auth['allow'] = []
-        return auth, auth_path
+            core.stop(timeout=timeout, platform_shutdown=True)
+        except TypeError:
+            core.stop()
+        except Exception as e:
+            self.logit(f"stopping {name} raised {e!r}")
+        glt = getattr(core, 'greenlet', None)
+        if glt is not None and not glt.ready():
+            self.logit(f"core greenlet of {name} did not finish; killing it")
+            glt.kill(block=True, timeout=timeout)
+        for g in list(getattr(core, 'spawned_greenlets', ())):
+            if not g.ready():
+                g.kill(block=False)
 
-    def _append_allow_curve_key(self, publickey, identity):
-        if not AuthEntry or not AuthFile:
-            return
+    def _stop_built_agents(self):
+        """Stop every agent this wrapper built (not ``dynamic_agent``, which shutdown handles itself)."""
+        for agent in self._built_agents:
+            if agent is self.dynamic_agent:    # appended before startup_platform assigned it; shutdown stops it itself
+                continue
+            self._stop_agent_core(agent)
+        self._built_agents = []
 
-        if identity:
-            entry = AuthEntry(user_id=identity,
-                              identity=identity,
-                              credentials=publickey,
-                              capabilities={'edit_config_store': {
-                                  'identity': identity
-                              }},
-                              comments="Added by platform wrapper")
-        else:
-            entry = AuthEntry(credentials=publickey,
-                              comments="Added by platform wrapper. No identity passed")
-        authfile = AuthFile(self.volttron_home + "/auth.json")
-        authfile.add(entry, no_error=True)
+    def _build_mock_agent(self, identity, address, agent_class, should_spawn, **kwargs):
+        """``messagebus='mock'``: no platform process and no credentials; the agent is a ``MockAgent`` (unless a class was
+        given) wired to this wrapper's ``TestServer``."""
+        if agent_class is None or agent_class is Agent:
+            from volttrontesting.mock_agent import MockAgent
+            agent_class = MockAgent
+        agent = agent_class(identity=identity, address=address, message_bus='mock', volttron_home=self.volttron_home,
+                            **kwargs)
+        if self.test_server:
+            self.test_server.connect_agent(agent)
+            if hasattr(agent, 'set_test_server'):
+                agent.set_test_server(self.test_server)
+            else:
+                from volttrontesting.pubsub_interceptor import intercept_agent_pubsub
+                intercept_agent_pubsub(agent, self.test_server.__server_pubsub__)
+            self.logit(f"Connected agent {identity} to TestServer")
+        if should_spawn:
+            event = gevent.event.Event()
+            gevent.spawn(agent.core.run, event)
+            event.wait(timeout=2)
+        self._built_agents.append(agent)
+        return agent
 
     def add_capabilities(self, publickey, capabilities):
-        if not AuthFile:
-            self.logit("AuthFile not available, skipping add_capabilities")
-            return
-
-        with with_os_environ(self.env):
-            if isinstance(capabilities, str) or isinstance(capabilities, dict):
-                capabilities = [capabilities]
-            auth_path = self.volttron_home + "/auth.json"
-            auth = AuthFile(auth_path)
-            entry = auth.find_by_credentials(publickey)[0]
-            caps = entry.capabilities
-
-            if isinstance(capabilities, list):
-                for c in capabilities:
-                    self.add_capability(c, caps)
-            else:
-                self.add_capability(capabilities, caps)
-            auth.add(entry, overwrite=True)
-            _log.debug("Updated entry is {}".format(entry))
-            # Minimum sleep of 2 seconds seem to be needed in order for auth updates to get propagated to peers.
-            # This slow down is not an issue with file watcher but rather vip.peerlist(). peerlist times out
-            # when invoked in quick succession. add_capabilities updates auth.json, gets the peerlist and calls all peers'
-            # auth.update rpc call. So sleeping here instead expecting individual test cases to sleep for long
-            gevent.sleep(2)
+        """Capabilities are authz roles on the modular platform; ``auth.json`` and ``AuthFile`` no longer exist.
+        Grant them with ``vctl authz`` or ``VolttronAuthzManager.create_or_merge_agent_authz`` (see
+        ``_write_agent_credentials``)."""
+        raise NotImplementedError(
+            "PlatformWrapper.add_capabilities: use vctl authz or VolttronAuthzManager on the modular platform")
 
     @staticmethod
     def add_capability(entry, capabilites):
@@ -803,117 +755,14 @@ class PlatformWrapper:
                 "Invalid capability {}. Capability should be string or dictionary or list of string"
                 "and dictionary.")
 
-    def set_auth_dict(self, auth_dict):
-        if auth_dict:
-            with open(os.path.join(self.volttron_home, 'auth.json'), 'w') as fd:
-                fd.write(jsonapi.dumps(auth_dict))
-
-    def _determine_dependencies(self):
-        """Determine which dependencies to install based on messagebus type."""
-        if self.messagebus == 'zmq':
-            return ['volttron-lib-zmq', 'volttron-lib-auth']
-        elif self.messagebus == 'rmq':
-            # Add RMQ-specific dependencies here when needed
-            return ['volttron-lib-rmq', 'volttron-lib-auth']
-        else:
-            return []
-
-    def _create_platform_config_manually(self):
-        """Create platform config file manually when store_message_bus_config is not available."""
-        config_path = os.path.join(self.volttron_home, "config")
-        config = ConfigParser()
-        config.add_section("volttron")
-        config.set("volttron", "messagebus", self.messagebus)
-        config.set("volttron", "instance-name", self.instance_name)
-        # address will be set later in startup_platform
-        # These other settings may not be needed for the new config format
-
-        with open(config_path, "w") as configfile:
-            config.write(configfile)
-        # all agents need read access to config file
-        os.chmod(config_path, 0o744)
-
-    def install_dependencies(self):
-        """Install dependencies using pip in the current Python environment."""
-        global store_message_bus_config, execute_command
-
-        if not self.dependencies:
-            self.logit(f"No dependencies to install for messagebus: {self.messagebus}")
-            return
-
-        with with_os_environ(self.env):
-            self.logit(f"Installing {self.messagebus} dependencies: {self.dependencies}")
-            for dep in self.dependencies:
-                # Check if dependency is already installed
-                check_cmd = [self.python, '-m', 'pip', 'show', dep]
-                try:
-                    result = subprocess.run(check_cmd,
-                                            capture_output=True,
-                                            text=True,
-                                            env=self.env)
-                    if result.returncode == 0:
-                        self.logit(f"{dep} is already installed, skipping...")
-                        continue
-                except:
-                    pass    # If check fails, try to install anyway
-
-                self.logit(f"Installing {dep}...")
-                cmd = [self.python, '-m', 'pip', 'install', dep]
-                try:
-                    if execute_command:
-                        result = execute_command(cmd, env=self.env, logger=_log)
-                    else:
-                        result = subprocess.run(cmd, capture_output=True, text=True,
-                                                env=self.env).stdout
-                    self.logit(f"Successfully installed {dep}")
-                except Exception as e:
-                    self.logit(f"Failed to install {dep}: {e}")
-                    raise PlatformWrapperError(f"Failed to install dependency {dep}: {e}")
-
-            self.logit("Dependencies installed successfully")
-
-            # After installing dependencies, try to import missing functions
-            global Agent, Connection
-            if not store_message_bus_config:
-                try:
-                    from volttron.utils import execute_command as ec
-                    from volttron.utils import store_message_bus_config as smbc
-                    store_message_bus_config = smbc
-                    execute_command = ec
-                    self.logit("Util functions loaded after dependency installation")
-                    # Now store the config properly
-                    if store_message_bus_config:
-                        store_message_bus_config(self.messagebus, self.instance_name)
-                except ImportError:
-                    self.logit(
-                        "Warning: util functions still not available after dependency installation"
-                    )
-
-            # Try to import Agent and Connection after dependencies are installed
-            global Agent
-            if not Agent:
-                try:
-                    from volttron.client import Agent as A
-                    Agent = A
-                    self.logit("Agent loaded after dependency installation")
-                except ImportError:
-                    self.logit("Warning: Agent still not available after dependency installation")
-
-    def startup_platform(
-        self,
-        address,
-        auth_dict=None,
-        mode=UNRESTRICTED,
-        msgdebug=False,
-        setupmode=False,
-        agent_monitor_frequency=600,
-        timeout=60,
-    # Allow the AuthFile to be preauthenticated with keys for service agents.
-        perform_preauth_service_agents=True):
-
-        # Install dependencies before starting platform (skip for mock)
-        if self.messagebus != 'mock':
-            self.install_dependencies()
+    def startup_platform(self, address,
+                         mode=UNRESTRICTED,
+                         msgdebug=False,
+                         enable_logging=False,
+                         agent_monitor_frequency=600,
+                         timeout=100,
+                         agent_isolation_mode = False,
+                         ):
 
         # Update OS env to current platform's env so get_home() call will result
         # in correct home director. Without this when more than one test instance are created, get_home()
@@ -986,49 +835,6 @@ class PlatformWrapper:
                         config.write(configfile)
             self.mode = mode
 
-            if perform_preauth_service_agents and AuthFile:
-                authfile = AuthFile()
-                if not authfile.read_allow_entries():
-                    # if this is a brand new auth.json
-                    # ZMQ-specific auth setup - commented out as it requires keystore
-                    # # pre-seed all of the volttron process identities before starting the platform
-                    # for identity in PROCESS_IDENTITIES:
-                    #     if identity == PLATFORM_WEB:
-                    #         capabilities = dict(allow_auth_modifications=None)
-                    #     else:
-                    #         capabilities = dict(edit_config_store=dict(identity="/.*/"))
-
-                    #     ks = KeyStore(KeyStore.get_agent_keystore_path(identity))
-                    #     entry = AuthEntry(credentials=encode_key(decode_key(ks.public)),
-                    #                       user_id=identity,
-                    #                       identity=identity,
-                    #                       capabilities=capabilities,
-                    #                       comments='Added by pre-seeding.')
-                    #     authfile.add(entry)
-
-                    # # Control connection needs to be added so that vctl can connect easily
-                    # identity = CONTROL_CONNECTION
-                    # capabilities = dict(edit_config_store=dict(identity="/.*/"))
-                    # ks = KeyStore(KeyStore.get_agent_keystore_path(identity))
-                    # entry = AuthEntry(credentials=encode_key(decode_key(ks.public)),
-                    #                   user_id=identity,
-                    #                   identity=identity,
-                    #                   capabilities=capabilities,
-                    #                   comments='Added by pre-seeding.')
-                    # authfile.add(entry)
-
-                    # identity = "dynamic_agent"
-                    # capabilities = dict(edit_config_store=dict(identity="/.*/"), allow_auth_modifications=None)
-                    # # Lets cheat a little because this is a wrapper and add the dynamic agent in here as well
-                    # ks = KeyStore(KeyStore.get_agent_keystore_path(identity))
-                    # entry = AuthEntry(credentials=encode_key(decode_key(ks.public)),
-                    #                   user_id=identity,
-                    #                   identity=identity,
-                    #                   capabilities=capabilities,
-                    #                   comments='Added by pre-seeding.')
-                    # authfile.add(entry)
-                    pass    # Placeholder for ZMQ auth setup
-
             msgdebug = self.env.get('MSG_DEBUG', False)
             enable_logging = self.env.get('ENABLE_LOGGING', False)
 
@@ -1042,53 +848,47 @@ class PlatformWrapper:
             opts = None
 
             # see main.py for how we handle pub sub addresses.
-            ipc = 'ipc://{}{}/run/'.format('@' if sys.platform.startswith('linux') else '',
-                                           self.volttron_home)
-            self.local_address = ipc + 'vip.socket'
-            self.set_auth_dict(auth_dict)
-
-            if self.remote_platform_ca:
-                ca_bundle_file = os.path.join(self.volttron_home, "cat_ca_certs")
-                with open(ca_bundle_file, 'w') as cf:
-                    if self.ssl_auth:
-                        with open(self.certsobj.cert_file(self.certsobj.root_ca_name)) as f:
-                            cf.write(f.read())
-                    with open(self.remote_platform_ca) as f:
-                        cf.write(f.read())
-                os.chmod(ca_bundle_file, 0o744)
-                self.env['REQUESTS_CA_BUNDLE'] = ca_bundle_file
-                os.environ['REQUESTS_CA_BUNDLE'] = self.env['REQUESTS_CA_BUNDLE']
-            # This file will be passed off to the main.py and available when
-            # the platform starts up.
-            self.requests_ca_bundle = self.env.get('REQUESTS_CA_BUNDLE')
+            ipc = 'ipc://{}{}/run/'.format(
+                '@' if sys.platform.startswith('linux') else '',
+                self.volttron_home)
+            self.local_vip_address = ipc + 'vip.socket'
+            # if self.remote_platform_ca:
+            #     ca_bundle_file = os.path.join(self.volttron_home, "cat_ca_certs")
+            #     with open(ca_bundle_file, 'w') as cf:
+            #         if self.ssl_auth:
+            #             with open(self.certsobj.cert_file(self.certsobj.root_ca_name)) as f:
+            #                 cf.write(f.read())
+            #         with open(self.remote_platform_ca) as f:
+            #             cf.write(f.read())
+            #     os.chmod(ca_bundle_file, 0o744)
+            #     self.env['REQUESTS_CA_BUNDLE'] = ca_bundle_file
+            #     os.environ['REQUESTS_CA_BUNDLE'] = self.env['REQUESTS_CA_BUNDLE']
+            # # This file will be passed off to the main.py and available when
+            # # the platform starts up.
+            # self.requests_ca_bundle = self.env.get('REQUESTS_CA_BUNDLE')
 
             self.opts.update({
-                'verify_agents': False,
-                'address': address,
                 'volttron_home': self.volttron_home,
-                'vip_local_address': ipc + 'vip.socket',
-                'publish_address': ipc + 'publish',
-                'subscribe_address': ipc + 'subscribe',
-                'secure_agent_users': self.secure_agent_users,
-                'platform_name': None,
-                'log': self.log_path,
-                'log_config': None,
-                'monitor': True,
-                'autostart': True,
+                'instance_name': self.instance_name,
+                'address': self.address,
+                'local_address': ipc + 'vip.socket',
+                'agent_isolation_mode': "true" if self.agent_isolation_mode else "false",
+                'messagebus': self.messagebus,
+                'auth_enabled': self.ssl_auth,
                 'log_level': logging.DEBUG,
                 'verboseness': logging.DEBUG,
-                'web_ca_cert': self.requests_ca_bundle
             })
 
-            # Known hosts handling is no longer needed without KeyStore
-            # Platform will handle authentication through the installed dependencies
 
-            # Only use old config creation if we have the function, otherwise skip as we already created it
-            if 'create_platform_config_file' in globals() and callable(
-                    create_platform_config_file):
-                pass    # Skip for now as it uses wrong format
-            # create_platform_config_file(self.messagebus, self.instance_name, self.address, agent_monitor_frequency,
-            #                              self.secure_agent_users)
+            # Add platform's public key to known hosts file
+            # publickey = self.keystore.public
+            # known_hosts_file = os.path.join(self.volttron_home, 'known_hosts')
+            # known_hosts = KnownHostsStore(known_hosts_file)
+            # known_hosts.add(self.opts['vip_local_address'], publickey)
+            # known_hosts.add(self.opts['vip_address'], publickey)
+
+            create_platform_config_file(self.messagebus, self.instance_name, self.address, agent_monitor_frequency,
+                                        self.agent_isolation_mode)
             if self.ssl_auth:
                 certsdir = os.path.join(self.volttron_home, 'certificates')
 
@@ -1105,120 +905,61 @@ class PlatformWrapper:
             #     cmd.append('--msgdebug')
             if enable_logging:
                 cmd.append('-vv')
-            cmd.append('-l{}'.format(self.log_path))
-            if setupmode:
-                cmd.append('--setup-mode')
+            cmd.extend(['-l', self.log_path])    # two tokens: the server's option pre-scan does not split '-lPATH'
 
-            from pprint import pprint
-            print('process environment: ')
-            pprint(self.env)
-            print('popen params: {}'.format(cmd))
-            self.p_process = Popen(cmd,
-                                   env=self.env,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE,
-                                   universal_newlines=True)
+
+            # Pre-register dynamic_agent credentials and authz BEFORE the server
+            # starts so the server reads them from disk on startup.  This ensures
+            # the server's in-memory authz map already contains "dynamic_agent"
+            # when the agent connects, avoiding a ValueError in the
+            # ConfigStore._onconfig background greenlet.
+            if self.messagebus == "zmq":
+                self._write_agent_credentials("dynamic_agent", admin=True)
+
+            self.p_process = Popen(cmd, env=self.env, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, universal_newlines=True)
 
             # A None value means that the process is still running.
             # A negative means that the process exited with an error.
             assert self.p_process.poll() is None
 
-            # The new volttron may not create a PID file, so let's check differently
-            # wait_for_volttron_startup(self.volttron_home, timeout)
-
-            # Instead, check if process is running and give it time to initialize
-            gevent.sleep(5)
-            if self.p_process.poll() is not None:
-                # Get stderr for debugging
-                _, stderr = self.p_process.communicate()
-                self.logit(f"Platform stderr: {stderr}")
-                raise PlatformWrapperError(
-                    f"Platform process exited with code {self.p_process.poll()}: {stderr}")
-
-            # Create PID file manually for compatibility
-            pid_file = os.path.join(self.volttron_home, "VOLTTRON_PID")
-            with open(pid_file, "w") as f:
-                f.write(str(self.p_process.pid))
-
-            # Create platform credentials for agents to use
-            cred_dir = Path(self.volttron_home) / "credentials_store"
-            cred_dir.mkdir(exist_ok=True)
-            platform_cred = cred_dir / "platform.json"
-            
-            # Generate dummy keys for platform
-            platform_public = str(uuid.uuid4())
-            platform_secret = str(uuid.uuid4())
-            
-            platform_data = {
-                "identity": "platform",
-                "domain": None,
-                "address": self.address,
-                "serverkey": platform_public,
-                "publickey": platform_public,
-                "secretkey": platform_secret
-            }
-            
-            with open(platform_cred, 'w') as f:
-                jsonapi.dump(platform_data, f)
-
-            # Server key will be handled by the installed dependencies
-            self.serverkey = platform_public    # Use the platform public key as server key
+            wait_for_volttron_startup(self.volttron_home, timeout)
+            cred_path = Path(os.environ['VOLTTRON_HOME']).expanduser() / f"credentials_store/{PLATFORM}.json"
+            self.serverkey = VolttronCredentials.load_from_file(cred_path)
+            assert self.serverkey
+            self.logit(f"Server platform publickey: {self.serverkey.publickey}")
 
             # Use dynamic_agent so we can look and see the agent with peerlist.
-            if not setupmode:
-                # Wait for platform to stabilize
-                gevent.sleep(3)
+            gevent.sleep(2)
+            self.dynamic_agent = self.build_agent(identity="dynamic_agent")
+            assert self.dynamic_agent is not None
+            assert isinstance(self.dynamic_agent, Agent)
+            has_control = False
+            times = 0
+            while not has_control and times < 10:
+                times += 1
+                try:
+                    has_control = CONTROL in self.dynamic_agent.vip.peerlist().get(timeout=2)
+                    self.logit("Has control? {}".format(has_control))
+                except gevent.Timeout:
+                    pass
 
-                # Try to ensure Agent is loaded
-                global Agent
-                if not Agent:
-                    try:
-                        from volttron.client import Agent
-                        self.logit("Agent imported successfully in startup_platform")
-                    except ImportError as e:
-                        self.logit(f"Failed to import Agent: {e}")
+            if not has_control:
+                self.shutdown_platform()
+                raise Exception("Couldn't connect to core platform!")
 
-                if Agent:    # Only build agent if Agent class is available
-                    try:
-                        self.dynamic_agent = self.build_agent(identity="dynamic_agent")
-                        if self.dynamic_agent is not None:
-                            assert isinstance(self.dynamic_agent, Agent)
-                    except Exception as e:
-                        self.logit(f"Failed to build dynamic agent: {e}")
-                        self.dynamic_agent = None
-                else:
-                    self.logit("Agent class not available, skipping dynamic_agent creation")
-                    self.dynamic_agent = None
-                if self.dynamic_agent:
-                    has_control = False
-                    times = 0
-                    while not has_control and times < 10:
-                        times += 1
-                        try:
-                            has_control = CONTROL in self.dynamic_agent.vip.peerlist().get(
-                                timeout=.2)
-                            self.logit("Has control? {}".format(has_control))
-                        except gevent.Timeout:
-                            pass
-
-                    if not has_control:
-                        self.shutdown_platform()
-                        raise Exception("Couldn't connect to core platform!")
-                else:
-                    self.logit("Skipping control check as Agent is not available")
-
-                # def subscribe_to_all(peer, sender, bus, topic, headers, messages):
-                #     logged = "{} --------------------Pubsub Message--------------------\n".format(
-                #         utils.format_timestamp(datetime.now()))
-                #     logged += "PEER: {}\n".format(peer)
-                #     logged += "SENDER: {}\n".format(sender)
-                #     logged += "Topic: {}\n".format(topic)
-                #     logged += "headers: {}\n".format([str(k) + '=' + str(v) for k, v in headers.items()])
-                #     logged += "message: {}\n".format(messages)
-                #     logged += "-------------------------------------------------------\n"
-                #     self.logit(logged)
-                #
-                # self.dynamic_agent.vip.pubsub.subscribe('pubsub', '', subscribe_to_all).get()
+            # def subscribe_to_all(peer, sender, bus, topic, headers, messages):
+            #     logged = "{} --------------------Pubsub Message--------------------\n".format(
+            #         utils.format_timestamp(datetime.now()))
+            #     logged += "PEER: {}\n".format(peer)
+            #     logged += "SENDER: {}\n".format(sender)
+            #     logged += "Topic: {}\n".format(topic)
+            #     logged += "headers: {}\n".format([str(k) + '=' + str(v) for k, v in headers.items()])
+            #     logged += "message: {}\n".format(messages)
+            #     logged += "-------------------------------------------------------\n"
+            #     self.logit(logged)
+            #
+            # self.dynamic_agent.vip.pubsub.subscribe('pubsub', '', subscribe_to_all).get()
 
         if self.is_running():
             self._instance_shutdown = False
@@ -1230,30 +971,6 @@ class PlatformWrapper:
             
         with with_os_environ(self.env):
             return is_volttron_running(self.volttron_home)
-
-    def direct_sign_agentpackage_creator(self, package):
-        assert RESTRICTED, "Auth not available"
-        print("wrapper.certsobj", self.certsobj.cert_dir)
-        assert (auth.sign_as_creator(
-            package, 'creator', certsobj=self.certsobj)), "Signing as {} failed.".format('creator')
-
-    def direct_sign_agentpackage_admin(self, package):
-        assert RESTRICTED, "Auth not available"
-        assert (auth.sign_as_admin(
-            package, 'admin', certsobj=self.certsobj)), "Signing as {} failed.".format('admin')
-
-    def direct_sign_agentpackage_initiator(self, package, config_file, contract):
-        assert RESTRICTED, "Auth not available"
-        files = {"config_file": config_file, "contract": contract}
-        assert (auth.sign_as_initiator(
-            package, 'initiator', files=files,
-            certsobj=self.certsobj)), "Signing as {} failed.".format('initiator')
-
-    def _aip(self):
-        opts = type('Options', (), self.opts)
-        aip = AIPplatform(opts)
-        aip.setup()
-        return aip
 
     def __install_agent_wheel__(self, wheel_file, start, vip_identity):
         with with_os_environ(self.env):
@@ -1302,7 +1019,8 @@ class PlatformWrapper:
                 raise PlatformWrapperError("Instance isn't running!")
 
             for path, config, start in agent_configs:
-                results = self.install_agent(agent_dir=path, config_file=config, start=start)
+                results.append(self.install_agent(agent_dir=path, config_file=config,
+                                             start=start))
 
         return results
 
@@ -1372,28 +1090,19 @@ class PlatformWrapper:
                                            os.path.basename(agent_dir) + "_config_file")
                 if isinstance(config_file, dict):
                     from os.path import basename, join
-                    temp_config = join(self.volttron_home, basename(agent_dir) + "_config_file")
+                    temp_config = join(self.volttron_home,
+                                       basename(agent_dir) + "_config_file")
                     with open(temp_config, "w") as fp:
                         fp.write(jsonapi.dumps(config_file))
                     config_file = temp_config
-                elif not config_file:
-                    if os.path.exists(os.path.join(agent_dir, "config")):
-                        config_file = os.path.join(agent_dir, "config")
+                elif config_file:
+                    if os.path.exists(config_file):
+                        pass
                     else:
-                        from os.path import basename, join
-                        temp_config = join(self.volttron_home,
-                                           basename(agent_dir) + "_config_file")
-                        with open(temp_config, "w") as fp:
-                            fp.write(jsonapi.dumps({}))
-                        config_file = temp_config
-                elif os.path.exists(config_file):
-                    pass    # config_file already set!
-                else:
-                    raise ValueError("Can't determine correct config file.")
-
-                cmd = [
-                    self.vctl_exe, "--json", "install", agent_dir, "--agent-config", config_file
-                ]
+                        raise ValueError("Config file {} doesn't exist.".format(config_file))
+                cmd = [self.vctl_exe, "--json", "install", agent_dir]
+                if config_file:
+                    cmd.extend(["--agent-config", config_file])
 
                 if force:
                     cmd.extend(["--force"])
@@ -1788,70 +1497,25 @@ class PlatformWrapper:
     #                                 max_retries=5,
     #                                 env=self.env)
 
-    def restart_platform(self):
+    def stop_platform(self):
+        """Stop the platform process but keep VOLTTRON_HOME, installed agents and credentials, so that
+        ``restart_platform`` can bring the same instance back."""
         with with_os_environ(self.env):
             original_skip_cleanup = self.skip_cleanup
             self.skip_cleanup = True
-            self.shutdown_platform()
-            self.skip_cleanup = original_skip_cleanup
+            try:
+                self.shutdown_platform()
+            finally:
+                self.skip_cleanup = original_skip_cleanup
+
+    def restart_platform(self):
+        with with_os_environ(self.env):
+            self.stop_platform()
             # since this is a restart, we don't want to do an update/overwrite of services.
-            self.startup_platform(address=self.address, perform_preauth_service_agents=False)
+            self.startup_platform(address=self.address)
             # we would need to reset shutdown flag so that platform is properly cleaned up on the next shutdown call
             self._instance_shutdown = False
             gevent.sleep(1)
-
-    def stop_platform(self):
-        """
-        Stop the platform without cleaning up any agents or context of the
-        agent.  This should be paired with restart platform in order to
-        maintain the context of the platform.
-        :return:
-        """
-        # Handle mock mode separately
-        if self.messagebus == 'mock':
-            if not self.is_running():
-                return
-            self.started = False
-            # Stop any mock agents that were created
-            if hasattr(self, 'agents'):
-                for agent in self.agents:
-                    if hasattr(agent, 'core') and hasattr(agent.core, 'stop'):
-                        agent.core.stop()
-            return
-            
-        with with_os_environ(self.env):
-            if not self.is_running():
-                return
-
-            if self.dynamic_agent is not None:
-                self.dynamic_agent.vip.rpc(CONTROL, "shutdown").get(timeout=20)
-                self.dynamic_agent.core.stop(timeout=20)
-            if self.p_process is not None:
-                try:
-                    gevent.sleep(0.2)
-                    self.p_process.terminate()
-                    gevent.sleep(0.2)
-                except OSError:
-                    self.logit('Platform process was terminated.')
-            else:
-                self.logit("platform process was null")
-            #
-            # cmd = [self.vctl_exe]
-            # cmd.extend(['shutdown', '--platform'])
-            # try:
-            #     execute_command(cmd, env=self.env, logger=_log,
-            #                     err_prefix="Error shutting down platform")
-            # except RuntimeError:
-            #     if self.p_process is not None:
-            #         try:
-            #             gevent.sleep(0.2)
-            #             self.p_process.terminate()
-            #             gevent.sleep(0.2)
-            #         except OSError:
-            #             self.logit('Platform process was terminated.')
-            #     else:
-            #         self.logit("platform process was null")
-            # gevent.sleep(1)
 
     def __remove_home_directory__(self):
         self.logit('Removing {}'.format(self.volttron_home))
@@ -1873,15 +1537,20 @@ class PlatformWrapper:
             # Handle mock messagebus shutdown
             if self.messagebus == 'mock':
                 self.logit("Shutting down mock platform")
+                self._stop_built_agents()
                 self.started = False
                 self._instance_shutdown = True
                 if not self.skip_cleanup:
                     self.__remove_home_directory__()
                 return
 
+            self._stop_built_agents()
             if not self.is_running():
                 self.logit(
                     f"Instance running {self.is_running()} and skip cleanup: {self.skip_cleanup}")
+                if self.dynamic_agent is not None:    # the platform died under it; do not leave its core behind
+                    self._stop_agent_core(self.dynamic_agent)
+                    self.dynamic_agent = None
                 if not self.skip_cleanup:
                     self.__remove_home_directory__()
                 return
@@ -1905,9 +1574,11 @@ class PlatformWrapper:
                 try:
                     # don't wait indefinitely as shutdown will not throw an error if RMQ is down/has cert errors
                     self.dynamic_agent.vip.rpc(CONTROL, 'shutdown').get(timeout=10)
-                    self.dynamic_agent.core.stop(timeout=10)
                 except gevent.Timeout:
                     self.logit("Timeout shutting down platform")
+                # The router is going away (or gone): stop the core without the agentstop send, and make sure none
+                # of its greenlets linger into the next instance.
+                self._stop_agent_core(self.dynamic_agent)
                 self.dynamic_agent = None
 
             if self.p_process is not None:

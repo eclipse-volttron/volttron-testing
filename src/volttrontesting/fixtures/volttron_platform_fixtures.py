@@ -34,7 +34,6 @@ from volttron.utils.context import ClientContext as cc
 
 # is_web_available
 #from volttron.platform import update_platform_config
-# from volttron.utils.keystore import get_random_key  # Removed - ZMQ specific
 from volttrontesting.fixtures.cert_fixtures import certs_profile_1
 from volttrontesting.platformwrapper import (
     PlatformWrapper,
@@ -75,13 +74,11 @@ def build_wrapper(address: str,
                   should_start: bool = True,
                   messagebus: str = 'zmq',
                   remote_platform_ca: Optional[str] = None,
-                  instance_name: Optional[str] = None,
-                  secure_agent_users: bool = False,
-                  **kwargs):
+                  instance_name: Optional[str] = None, agent_isolation_mode: bool = False, **kwargs):
     wrapper = PlatformWrapper(ssl_auth=kwargs.pop('ssl_auth', False),
                               messagebus=messagebus,
                               instance_name=instance_name,
-                              secure_agent_users=secure_agent_users,
+                              agent_isolation_mode=agent_isolation_mode,
                               remote_platform_ca=remote_platform_ca)
     if should_start:
         try:
@@ -157,13 +154,11 @@ def volttron_instance_module_web(request):
 # Generic fixtures. Ideally we want to use the below instead of
 # Use this fixture when you want a single instance of volttron platform for
 # test
-@pytest.fixture(
-    scope="module",
-    params=[
-        dict(messagebus='mock', ssl_auth=False),
-    # dict(messagebus='zmq', ssl_auth=False),
-    # pytest.param(dict(messagebus='rmq', ssl_auth=True), marks=rmq_skipif),
-    ])
+@pytest.fixture(scope="module",
+                params=[
+                    dict(messagebus='zmq', ssl_auth=True),
+                    # pytest.param(dict(messagebus='rmq', ssl_auth=True), marks=rmq_skipif),
+                ])
 def volttron_instance(request, **kwargs):
     """Fixture that returns a single instance of volttron platform for volttrontesting
 
@@ -522,17 +517,15 @@ def get_test_volttron_home(messagebus: str,
             ip, port = get_rand_ip_and_port()
             address = f"tcp://{ip}:{port}"
 
-    if web_https:
-        hostname, port = get_hostname_and_random_port()
-        bind_web_address = f"https://{hostname}:{port}"
-        web_ssl_cert = web_certs.server_certs[0].cert_file
-        web_ssl_key = web_certs.server_certs[0].key_file
-    elif web_http:
-        hostname, port = get_hostname_and_random_port()
-        bind_web_address = f"http://{hostname}:{port}"
-        # web_secret_key = get_random_key()  # Removed - ZMQ specific
-        import uuid
-        web_secret_key = str(uuid.uuid4())
+    # if web_https:
+    #     hostname, port = get_hostname_and_random_port()
+    #     bind_web_address = f"https://{hostname}:{port}"
+    #     web_ssl_cert = web_certs.server_certs[0].cert_file
+    #     web_ssl_key = web_certs.server_certs[0].key_file
+    # elif web_http:
+    #     hostname, port = get_hostname_and_random_port()
+    #     bind_web_address = f"http://{hostname}:{port}"
+    #     web_secret_key = get_random_key()
 
     if address:
         config_file['address'] = address
