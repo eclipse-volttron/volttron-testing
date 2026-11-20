@@ -20,7 +20,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
-pytest = "^7.0.0"
+pytest = ">=7.0"
 # mock is built-in for Python 3.3+ as unittest.mock
 anypubsub = "^0.6"
 # todo remove dependency on grequests
