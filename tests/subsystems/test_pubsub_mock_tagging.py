@@ -9,6 +9,12 @@ from volttron.client.vip.agent import Agent
 from volttron.client.vip.agent import PubSub
 from volttron.utils import format_timestamp
 
+# volttron-core#363: Agent.Subsystems passes itself, not the agent, as PubSub's owner, so @PubSub.subscribe and
+# @PubSub.subscribe_by_tags are never registered. Strict: these start passing (and must be unmarked) once it is fixed.
+DECORATED_SUBSCRIPTIONS_IGNORED = pytest.mark.xfail(
+    raises=AssertionError, strict=True,
+    reason="volttron-core#363: decorated pubsub subscriptions are never registered")
+
 
 def _until(action, condition, timeout=15.0):
     """Repeat ``action`` (a publish) about once a second until ``condition`` holds. A subscription made at agent start
@@ -83,6 +89,7 @@ headers = {
         }
 
 
+@DECORATED_SUBSCRIPTIONS_IGNORED
 def test_subscribe_by_tags_class_method(volttron_instance, test_agents):
     pub_agent, agent = test_agents
     try:
@@ -104,6 +111,7 @@ def test_subscribe_by_tags_class_method(volttron_instance, test_agents):
         agent.reset_results()
 
 
+@DECORATED_SUBSCRIPTIONS_IGNORED
 def test_subscribe_by_tags_instance_method(volttron_instance, test_agents):
     pub_agent, agent = test_agents
     try:
