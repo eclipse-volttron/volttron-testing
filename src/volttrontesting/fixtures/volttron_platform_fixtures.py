@@ -22,7 +22,6 @@
 # ===----------------------------------------------------------------------===
 # }}}
 
-import contextlib
 import os
 import shutil
 from pathlib import Path
@@ -33,7 +32,6 @@ import pytest
 from volttrontesting import adapters
 
 # is_web_available
-#from volttron.platform import update_platform_config
 from volttrontesting.fixtures.cert_fixtures import certs_profile_1
 from volttrontesting.platformwrapper import (
     PlatformWrapper,
@@ -230,127 +228,6 @@ def get_volttron_instances(request):
 
 # Use this fixture when you want a single instance of volttron platform for zmq message bus
 # test
-@contextlib.contextmanager
-def get_test_volttron_home(messagebus: str,
-                           web_https=False,
-                           web_http=False,
-                           has_vip=True,
-                           volttron_home: str = None,
-                           config_params: dict = None,
-                           env_options: dict = None):
-    """
-    Create a full volttronn_home test environment with all of the options available in the environment
-    (os.environ) and configuration file (volttron_home/config) in order to test from.
-
-    @param messagebus:
-        A message bus name with an available adapter
-    @param web_https:
-        Determines if https should be used and enabled.  If this is specified then the cert_fixtures.certs_profile_1
-        function will be used to generate certificates for  the server and signed ca.  Either web_https or web_http
-        may be specified not both.
-    @param config_params:
-        Configuration parameters that should go into the volttron configuration file, note if the basic ones are
-        set via the previous arguments (i.e. web_https) then it is an error to specify bind-web-address (or other)
-        duplicate.
-    @param env_options:
-        Other options that should be specified in the os.environ during the setup of this environment.
-    """
-    # Make these not None so that we can use set operations on them to see if we have any overlap between
-    # common configuration params and environment.
-    if config_params is None:
-        config_params = {}
-    if env_options is None:
-        env_options = {}
-
-    # make a copy so we can restore in cleanup
-    env_cpy = os.environ.copy()
-
-    # start validating input
-    adapters.adapter_class("bus", messagebus)
-
-    if web_http and web_https:
-        raise ValueError(
-            "Incompatabile tyeps web_https and web_Http cannot both be specified as True")
-
-    default_env_options = ('VOLTTRON_HOME', 'MESSAGEBUS')
-
-    for v in default_env_options:
-        if v in env_options:
-            raise ValueError(f"Cannot specify {v} in env_options as it is set already.")
-
-    # All is well.Create vhome
-    if volttron_home:
-        os.makedirs(volttron_home, exist_ok=True)
-    else:
-        volttron_home = create_volttron_home()
-
-    # Create env
-    envs = dict(VOLTTRON_HOME=volttron_home, MESSAGEBUS=messagebus)
-    os.environ.update(envs)
-    os.environ.update(env_options)
-
-    # make the top level dirs
-    os.mkdir(os.path.join(volttron_home, "agents"))
-    os.mkdir(os.path.join(volttron_home, "configuration_store"))
-    os.mkdir(os.path.join(volttron_home, "keystores"))
-    os.mkdir(os.path.join(volttron_home, "run"))
-
-    # create the certs. This will create the certs dirs
-    web_certs_dir = os.path.join(volttron_home, "web_certs")
-    web_certs = None
-    if web_https:
-        web_certs = certs_profile_1(web_certs_dir)
-
-    address = None
-    bind_web_address = None
-    web_ssl_cert = None
-    web_ssl_key = None
-    web_secret_key = None
-
-    config_file = {}
-    if web_http or web_https:
-        ip, port = get_rand_ip_and_port()
-        address = f"tcp://{ip}:{port}"
-
-    # if web_https:
-    #     hostname, port = get_hostname_and_random_port()
-    #     bind_web_address = f"https://{hostname}:{port}"
-    #     web_ssl_cert = web_certs.server_certs[0].cert_file
-    #     web_ssl_key = web_certs.server_certs[0].key_file
-    # elif web_http:
-    #     hostname, port = get_hostname_and_random_port()
-    #     bind_web_address = f"http://{hostname}:{port}"
-    #     web_secret_key = get_random_key()
-
-    if address:
-        config_file['address'] = address
-    if bind_web_address:
-        config_file['bind-web-address'] = bind_web_address
-    if web_ssl_cert:
-        config_file['web-ssl-cert'] = web_ssl_cert
-    if web_ssl_key:
-        config_file['web-ssl-key'] = web_ssl_key
-    if web_secret_key:
-        config_file['web-secret-key'] = web_secret_key
-
-    config_intersect = set(config_file).intersection(set(config_params))
-    if len(config_intersect) > 0:
-        raise ValueError(
-            f"passed configuration params {list(config_intersect)} are built internally")
-
-    config_file.update(config_params)
-
-    update_platform_config(config_file)
-
-    try:
-        yield volttron_home
-    finally:
-        os.environ.clear()
-        os.environ.update(env_cpy)
-        if not os.environ.get("DEBUG", 0) != 1 and not os.environ.get("DEBUG_MODE", 0):
-            shutil.rmtree(volttron_home, ignore_errors=True)
-
-
 @pytest.fixture(scope="module", params=platform_params())
 def platforms(request):
     """A factory for independent platforms in one test module: ``a, b = platforms(2)``, once per selected message
