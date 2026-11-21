@@ -754,3 +754,28 @@ def two_way_federated_rmq_instances(request, **kwargs):
             rmq_mgmt.delete_multiplatform_parameter('federation-upstream', instance_2_link_name)
     instance_1.shutdown_platform()
     instance_2.shutdown_platform()
+
+
+@pytest.fixture(scope="module")
+def platforms():
+    """A factory for independent zmq platforms in one test module: ``a, b = platforms(2)``.
+
+    Each wrapper has its own VOLTTRON_HOME and a TCP ``address``, and its ``serverkey`` once started, which is what an
+    agent on one platform needs to connect to another (not wired up here; forwarder and federation tests will add
+    that). Unlike ``build_wrapper``, a platform that fails to start fails the test. Every platform the factory
+    started is shut down when the module finishes. Keyword arguments go to ``PlatformWrapper``.
+    """
+    started = []
+
+    def start(n: int = 1, **kwargs):
+        new = []
+        for _ in range(n):
+            wrapper = PlatformWrapper(messagebus='zmq', ssl_auth=kwargs.pop('ssl_auth', True), **kwargs)
+            started.append(wrapper)
+            wrapper.startup_platform(address=get_rand_vip())
+            new.append(wrapper)
+        return new
+
+    yield start
+    for wrapper in started:
+        cleanup_wrapper(wrapper)

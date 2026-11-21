@@ -24,6 +24,7 @@
 
 import configparser as configparser
 import logging
+import dataclasses
 import os
 import re
 import shutil
@@ -82,6 +83,7 @@ from volttron.utils.commands import is_volttron_running, wait_for_volttron_start
 from volttron.utils.context import ClientContext as cc
 
 #from volttron.client.vip.agent.connection import Connection
+from volttrontesting.platform_cli import PlatformCLI
 from volttrontesting.utils import (
     get_hostname_and_random_port,
     get_rand_ip_and_port,
@@ -323,6 +325,7 @@ class PlatformWrapper:
         # gone keeps reconnecting, and with such agents alive the next instance's agents never connect (seen with the
         # pubsub and vctl modules, which build agents they do not stop).
         self._built_agents = []
+        self._core_builder = None    # this wrapper's ZmqCoreBuilder, see _zmq_core_builder
 
         self.volttron_home = create_volttron_home()
 
@@ -364,6 +367,9 @@ class PlatformWrapper:
         self.env = {
             'HOME': self.user_home,
             'VOLTTRON_HOME': self.volttron_home,
+            # poetry, run by the platform to install agents, uses this environment (see PlatformCLI.prepare)
+            'VIRTUAL_ENV': str(Path(sys.executable).parent.parent),
+            'PYTHON_KEYRING_BACKEND': 'keyring.backends.null.Keyring',
             'MESSAGEBUS': messagebus if messagebus else 'zmq',
             'AGENT_ISOLATION_MODE': "true" if agent_isolation_mode else "false",
             'PACKAGED_DIR': self.packaged_dir,
@@ -437,6 +443,10 @@ class PlatformWrapper:
         self.instance_name = instance_name
         if not self.instance_name:
             self.instance_name = os.path.basename(os.path.dirname(self.volttron_home))
+        # Starts, stops and talks to the platform (config, poetry setup, process, readiness, vctl, logs); this
+        # wrapper adds agents built in the test process and several instances per session on top.
+        self.cli = PlatformCLI(self.volttron_home, self.instance_name, auth_enabled=ssl_auth,
+                               agent_isolation_mode=agent_isolation_mode, env=self.env)
 
         with with_os_environ(self.env):
             from volttron.utils import ClientContext
@@ -465,6 +475,18 @@ class PlatformWrapper:
             self.skip_cleanup = self.env.get('SKIP_CLEANUP', False)
             self.server_config = ServerConfig()
 
+
+    @property
+    def p_process(self):
+        """The platform process (the CLI's), read by the fixtures and downstream tests."""
+        cli = self.__dict__.get('cli')
+        return cli.process if cli is not None else None
+
+    @p_process.setter
+    def p_process(self, value):
+        cli = self.__dict__.get('cli')
+        if cli is not None:
+            cli.process = value
 
     def logit(self, message):
         print('{}: {}'.format(self.volttron_home, message))
@@ -647,13 +669,17 @@ class PlatformWrapper:
 
             self.logit(f"Using vip-address {address}")
             self.logit(f"Got agent credentials for identity {identity} as {agent_cred}")
-            self._use_zmq_core_builder()
+            # Any other AgentOptions field (tag_refresh_interval, tag_vip_id, reconnect_interval, ...) passes through;
+            # dropping them silently made agents ignore the options a test asked for.
+            option_names = {f.name for f in dataclasses.fields(AgentOptions)} - {'volttron_home'}
             agent_opts = AgentOptions(heartbeat_autostart=kwargs.pop('heartbeat_autostart', False),
                                       heartbeat_period=kwargs.pop('heartbeat_period', 60),
                                       volttron_home=self.volttron_home,
-                                      enable_store=False)
-            agent = agent_class(credentials=agent_cred,
-                                options=agent_opts, address=address)
+                                      enable_store=kwargs.pop('enable_store', False),
+                                      **{k: kwargs.pop(k) for k in list(kwargs) if k in option_names})
+            with self._zmq_core_builder():
+                agent = agent_class(credentials=agent_cred,
+                                    options=agent_opts, address=address)
             self.logit('platformwrapper.build_agent.address: {}'.format(address))
             
             if should_spawn:
@@ -669,18 +695,43 @@ class PlatformWrapper:
             self._built_agents.append(agent)
             return agent
 
-    @staticmethod
-    def _use_zmq_core_builder():
-        """Pin core's cached core builder to ``ZmqCoreBuilder`` before building a real agent.
+    def _vctl(self, cmd, json_output=False):
+        """Run a vctl command list (``[vctl_exe | 'vctl' | 'volttron-ctl', *args]``, as the methods below build them)
+        through this platform's PlatformCLI. With ``json_output`` the parsed JSON document is returned; a leading
+        ``--json`` in ``cmd`` is implied. Raises PlatformError, a RuntimeError, on a non-zero exit."""
+        assert cmd and Path(str(cmd[0])).name in ('vctl', 'volttron-ctl'), cmd
+        args = [str(a) for a in cmd[1:]]
+        if json_output:
+            return self.cli.vctl_json(*(args[1:] if args and args[0] == '--json' else args))
+        return self.cli.vctl(*args)
 
-        Importing ``volttrontesting.mock_core_builder`` (which any mock-mode test earlier in the session does) adds a
-        second entry to core's builder registry. From then on ``get_core_builder()`` without a name either cannot choose
-        or, when only the mock is registered, hands a real ``Agent`` a ``MockConnection`` that fails on its first
-        ``send_vip``. Selecting by name makes the zmq path independent of what ran before."""
-        from volttron.client.decorators import get_core_builder, reset_core_builder
+    @contextmanager
+    def _zmq_core_builder(self):
+        """Construct real agents with this wrapper's ``ZmqCoreBuilder``, and leave core's builder cache as it was.
+
+        ``Agent.__init__`` asks ``get_core_builder()`` for the process-wide cached builder. Once a mock-mode test has
+        imported ``volttrontesting.mock_core_builder`` the registry holds two builders, and an unnamed lookup either
+        cannot choose or hands a real agent a ``MockConnection``. The cache also wins over an explicit name, so a
+        builder left in it by one test is what every later agent gets, real or mock (volttron-core#361). The wrapper
+        therefore installs its own zmq builder only for the duration of the constructor and restores the previous
+        cache afterwards; all of a wrapper's agents share that one builder, as its constructor intends."""
+        from volttron.client import decorators
+        from volttron.server.containers import service_repo
         import volttron.messagebus.zmq.zmq_core    # noqa: F401  registers ZmqCoreBuilder
-        reset_core_builder()
-        get_core_builder(name='ZmqCoreBuilder')
+        # ZmqCoreBuilder takes the server's public key from the CredentialsStore in core's service registry when one
+        # resolves (lib-zmq registers it on import), and the registry caches the first instance. With several
+        # wrappers alive, agents built for one got the key of whichever platform resolved first and never connected.
+        # Resetting the cached instances here, inside this wrapper's environment, resolves the store for this home.
+        service_repo.reset_instances()
+        previous = decorators.__core_builder__
+        if self._core_builder is None:
+            decorators.__core_builder__ = None
+            self._core_builder = decorators.get_core_builder(name='ZmqCoreBuilder')
+        decorators.__core_builder__ = self._core_builder
+        try:
+            yield
+        finally:
+            decorators.__core_builder__ = previous
 
     def _stop_agent_core(self, agent, timeout=5):
         """Stop an in-process agent's core without touching the bus, and kill whatever is left after ``timeout``.
@@ -887,26 +938,21 @@ class PlatformWrapper:
             # known_hosts.add(self.opts['vip_local_address'], publickey)
             # known_hosts.add(self.opts['vip_address'], publickey)
 
-            create_platform_config_file(self.messagebus, self.instance_name, self.address, agent_monitor_frequency,
-                                        self.agent_isolation_mode)
+            # The platform itself is started by this wrapper's PlatformCLI: config file, poetry setup and pinned
+            # project, process, output file and readiness are the CLI's, so there is one way to start a platform.
+            self.cli.address = self.address
+            self.cli.auth_enabled = self.ssl_auth
+            self.cli.agent_isolation_mode = self.agent_isolation_mode
+            self.cli.agent_monitor_frequency = agent_monitor_frequency
+            self.cli.prepare()
+
             if self.ssl_auth:
                 certsdir = os.path.join(self.volttron_home, 'certificates')
-
                 self.certsobj = Certs(certsdir)
 
             if self.services:
                 with Path(self.volttron_home).joinpath("service_config.yml").open('wt') as fp:
                     yaml.dump(self.services, fp)
-
-            cmd = [self.volttron_exe]
-            cmd.append('--messagebus')
-            cmd.append(self.messagebus)
-            # if msgdebug:
-            #     cmd.append('--msgdebug')
-            if enable_logging:
-                cmd.append('-vv')
-            cmd.extend(['-l', self.log_path])    # two tokens: the server's option pre-scan does not split '-lPATH'
-
 
             # Pre-register dynamic_agent credentials and authz BEFORE the server
             # starts so the server reads them from disk on startup.  This ensures
@@ -916,14 +962,7 @@ class PlatformWrapper:
             if self.messagebus == "zmq":
                 self._write_agent_credentials("dynamic_agent", admin=True)
 
-            self.p_process = Popen(cmd, env=self.env, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, universal_newlines=True)
-
-            # A None value means that the process is still running.
-            # A negative means that the process exited with an error.
-            assert self.p_process.poll() is None
-
-            wait_for_volttron_startup(self.volttron_home, timeout)
+            self.cli.launch(timeout)
             cred_path = Path(os.environ['VOLTTRON_HOME']).expanduser() / f"credentials_store/{PLATFORM}.json"
             self.serverkey = VolttronCredentials.load_from_file(cred_path)
             assert self.serverkey
@@ -982,9 +1021,7 @@ class PlatformWrapper:
             if vip_identity:
                 cmd.extend(['--vip-identity', vip_identity])
 
-            res = execute_command(cmd, env=env, logger=_log)
-            assert res, "failed to install wheel:{}".format(wheel_file)
-            res = jsonapi.loads(res)
+            res = self._vctl(cmd, json_output=True)
             agent_uuid = res['agent_uuid']
             self.logit(f"Inside __install_agent_wheel__ res is: {res}")
             self.logit(agent_uuid)
@@ -1112,38 +1149,8 @@ class PlatformWrapper:
                 # if start:
                 #     cmd.extend(["--start"])
                 self.logit(f"Command installation is: {cmd}")
-                stdout = execute_command(cmd,
-                                         logger=_log,
-                                         env=self.env,
-                                         err_prefix="Error installing agent")
-                self.logit(f"RESPONSE FROM INSTALL IS: {stdout}")
-                # Because we are no longer silencing output from the install, the
-                # the results object is now much more verbose.  Our assumption is
-                # that the result we are looking for is the only JSON block in
-                # the output
-
-                match = re.search(r'^({.*})', stdout, flags=re.M | re.S)
-                if match:
-                    results = match.group(0)
-                else:
-                    raise ValueError("The results were not found in the command output")
-                self.logit("here are the results: {}".format(results))
-
-                #
-                # Response from results is expected as follows depending on
-                # parameters, note this is a json string so parse to get dictionary
-                # {
-                #     "started": true,
-                #     "agent_pid": 26241,
-                #     "starting": true,
-                #     "agent_uuid": "ec1fd94e-922a-491f-9878-c392b24dbe50"
-                # }
-                assert results
-
-                resultobj = jsonapi.loads(str(results))
-
-                # if start:
-                #     assert resultobj['started']
+                resultobj = self._vctl(cmd, json_output=True)
+                self.logit(f"RESPONSE FROM INSTALL IS: {resultobj}")
                 agent_uuid = resultobj['agent_uuid']
 
                 assert resultobj
@@ -1204,14 +1211,14 @@ class PlatformWrapper:
 
             cmd = [self.vctl_exe, '--json']
             cmd.extend(['start', agent_uuid])
-            result = execute_command(cmd, self.env)
+            self._vctl(cmd)
 
             self.__wait_for_control_connection_to_exit__()
 
             # Confirm agent running
             cmd = [self.vctl_exe, '--json']
             cmd.extend(['status', agent_uuid])
-            res = execute_command(cmd, env=self.env)
+            res = self._vctl(cmd)
 
             result = jsonapi.loads(res)
             # 776 TODO: Timing issue where check fails
@@ -1240,10 +1247,7 @@ class PlatformWrapper:
 
             cmd = [self.vctl_exe]
             cmd.extend(['stop', agent_uuid])
-            res = execute_command(cmd,
-                                  env=self.env,
-                                  logger=_log,
-                                  err_prefix="Error stopping agent")
+            res = self._vctl(cmd)
             return self.agent_pid(agent_uuid)
 
     def list_agents(self):
@@ -1358,10 +1362,7 @@ class PlatformWrapper:
             self.__wait_for_control_connection_to_exit__()
             cmd = [self.vctl_exe]
             cmd.extend(['remove', agent_uuid])
-            res = execute_command(cmd,
-                                  env=self.env,
-                                  logger=_log,
-                                  err_prefix="Error removing agent")
+            res = self._vctl(cmd)
             pid = None
             try:
                 pid = self.agent_pid(agent_uuid)
@@ -1399,10 +1400,7 @@ class PlatformWrapper:
         cmd.extend(['status', agent_uuid])
         pid = None
         try:
-            res = execute_command(cmd,
-                                  env=self.env,
-                                  logger=_log,
-                                  err_prefix="Error getting agent status")
+            res = self._vctl(cmd)
             try:
                 pidpos = res.index('[') + 1
                 pidend = res.index(']')
@@ -1571,29 +1569,17 @@ class PlatformWrapper:
                         self.logit("Unable to shutdown agent. instance is already shutdown")
                     self.logit(f"Error shutting down agent {e}")
 
-                try:
-                    # don't wait indefinitely as shutdown will not throw an error if RMQ is down/has cert errors
-                    self.dynamic_agent.vip.rpc(CONTROL, 'shutdown').get(timeout=10)
-                except gevent.Timeout:
-                    self.logit("Timeout shutting down platform")
-                # The router is going away (or gone): stop the core without the agentstop send, and make sure none
-                # of its greenlets linger into the next instance.
+                # Stop the in-process agent first (without the agentstop send, see _stop_agent_core); the CLI then
+                # shuts the platform down.
                 self._stop_agent_core(self.dynamic_agent)
                 self.dynamic_agent = None
 
             if self.p_process is not None:
-                try:
-                    gevent.sleep(0.2)
-                    self.p_process.terminate()
-                    gevent.sleep(0.2)
-                except OSError:
-                    self.logit('Platform process was terminated.')
-                pid_file = "{vhome}/VOLTTRON_PID".format(vhome=self.volttron_home)
-                try:
-                    self.logit(f"Remove PID file: {pid_file}")
+                # vctl shutdown --platform, wait, and kill if it does not exit
+                self.cli.shutdown()
+                pid_file = os.path.join(self.volttron_home, "VOLTTRON_PID")
+                if os.path.exists(pid_file):    # left behind only when the platform had to be killed
                     os.remove(pid_file)
-                except OSError:
-                    self.logit('Error while removing VOLTTRON PID file {}'.format(pid_file))
             else:
                 self.logit("platform process was null")
 
