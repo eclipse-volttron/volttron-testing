@@ -88,12 +88,13 @@ class ZmqAdapter:
         """
         from volttron.client import decorators
         from volttron.server.containers import service_repo
-        import volttron.messagebus.zmq.zmq_core    # noqa: F401  registers ZmqCoreBuilder
+        from volttron.messagebus.zmq.zmq_core import ZmqCoreBuilder
         service_repo.reset_instances()
         previous = decorators.__core_builder__
         if self._builder is None:
-            decorators.__core_builder__ = None
-            self._builder = decorators.get_core_builder(name='ZmqCoreBuilder')
+            # Constructed here rather than through get_core_builder(), whose caching differs between core releases
+            # (one builder per process before volttron-core#361, one per name after): each platform needs its own.
+            self._builder = ZmqCoreBuilder()
         decorators.__core_builder__ = self._builder
         try:
             yield
