@@ -14,10 +14,11 @@ VOLTTRON agents and libraries at three levels:
 * **White box.** ``PlatformWrapper`` starts a real platform through ``PlatformCLI`` and also builds agents in the
   test process, for assertions on the message bus itself.
 
-The real-platform levels run on any message bus and auth module that has an adapter. See
-:ref:`Testing-Adapters`.
+Its pytest plugin provides fixtures for the real-platform levels (:ref:`Testing-Fixtures`). They run on any message
+bus and auth module that has an adapter (:ref:`Testing-Adapters`).
 
 .. toctree::
    :maxdepth: 2
 
+   fixtures
    adapters
