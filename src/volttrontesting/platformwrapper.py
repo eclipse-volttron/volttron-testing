@@ -716,7 +716,13 @@ class PlatformWrapper:
         therefore installs its own zmq builder only for the duration of the constructor and restores the previous
         cache afterwards; all of a wrapper's agents share that one builder, as its constructor intends."""
         from volttron.client import decorators
+        from volttron.server.containers import service_repo
         import volttron.messagebus.zmq.zmq_core    # noqa: F401  registers ZmqCoreBuilder
+        # ZmqCoreBuilder takes the server's public key from the CredentialsStore in core's service registry when one
+        # resolves (lib-zmq registers it on import), and the registry caches the first instance. With several
+        # wrappers alive, agents built for one got the key of whichever platform resolved first and never connected.
+        # Resetting the cached instances here, inside this wrapper's environment, resolves the store for this home.
+        service_repo.reset_instances()
         previous = decorators.__core_builder__
         if self._core_builder is None:
             decorators.__core_builder__ = None
