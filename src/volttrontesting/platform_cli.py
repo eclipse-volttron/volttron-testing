@@ -34,6 +34,12 @@ environment (:func:`environment_project`). The platform records installed agents
 build it itself, it adds editable packages before pinning the rest, and resolving their dependencies then upgrades
 packages such as volttron-core to the newest PyPI release, changing the environment under the tests. With the file
 provided the platform only locks it and installs nothing.
+
+Commands run through the standard library's ``subprocess`` and waits use ``time.sleep``, deliberately not gevent's. In
+a gevent-patched process (importing core's client code, and so ``PlatformWrapper``, applies the patch) both are
+cooperative, so agents built in the test process keep running while vctl does; elsewhere they are ordinary blocking
+calls, which suits harnesses that do not use gevent. Importing ``gevent.subprocess`` here would tie a standard
+library module to gevent and still leave the sleeps blocking without the patch.
 """
 from __future__ import annotations
 
@@ -55,15 +61,10 @@ from typing import Callable, Iterable
 from volttrontesting.configs import AgentSources, AgentSpec
 from volttrontesting.harness import free_port
 
-__all__ = ["PlatformCLI", "PlatformError", "WebOptions", "environment_project", "POETRY_LOCAL_CONFIG",
-           "MESSAGE_BUS_DISTRIBUTIONS"]
+__all__ = ["PlatformCLI", "PlatformError", "WebOptions", "environment_project", "POETRY_LOCAL_CONFIG"]
 
 # Keep poetry (which the platform uses to record installed agents) in the environment running the tests.
 POETRY_LOCAL_CONFIG = "[virtualenvs]\ncreate = false\n\n[keyring]\nenabled = false\n"
-
-# Distributions that provide a message bus, and with it the CredentialsStore the auth service needs. An environment
-# with volttron-core but none of these cannot start a platform.
-MESSAGE_BUS_DISTRIBUTIONS = ("volttron-lib-zmq", )
 
 
 class PlatformError(RuntimeError):
@@ -162,12 +163,29 @@ class PlatformCLI:
 
     # ------------------------------------------------------------------ availability
     @classmethod
-    def missing(cls, *, driver: bool = False, web: bool = False) -> list[str]:
-        """What the running environment lacks for a platform (and, if asked, ``vctl driver`` or the web service)."""
+    def missing(cls, *, driver: bool = False, web: bool = False, message_bus: str | None = None,
+                auth: bool = True) -> list[str]:
+        """What the running environment lacks for a platform (and, if asked, ``vctl driver`` or the web service).
+
+        The message bus is ``message_bus`` if given, else any bus with an available adapter
+        (:mod:`volttrontesting.adapters`); with ``auth``, the platform also needs its one auth module.
+        """
+        from volttrontesting import adapters
         bin = Path(sys.executable).parent
         missing = [exe for exe in ("volttron", "vctl") if not (bin / exe).exists()]
-        if not any(_installed(name) for name in MESSAGE_BUS_DISTRIBUTIONS):
-            missing.append(f"a message bus ({', '.join(MESSAGE_BUS_DISTRIBUTIONS)})")
+        if message_bus is not None:
+            try:
+                adapters.adapter_class("bus", message_bus)
+            except adapters.AdapterError as e:
+                missing.append(f"message bus {message_bus!r}: {e}")
+        elif not adapters.available("bus"):
+            buses = ", ".join(f"{n} ({', '.join(adapters.distributions('bus', n))})" for n in adapters.registered("bus"))
+            missing.append(f"a message bus (registered: {buses})")
+        if auth:
+            try:
+                adapters.selected_auth()
+            except adapters.AdapterError as e:
+                missing.append(f"an auth module: {e}")
         if driver and importlib.util.find_spec("volttron.plugins.vctl.driver") is None:
             missing.append("the Platform Driver (for the vctl driver plugin)")
         if web and not _installed("volttron-lib-web"):
@@ -175,8 +193,9 @@ class PlatformCLI:
         return missing
 
     @classmethod
-    def available(cls, *, driver: bool = False, web: bool = False) -> bool:
-        return not cls.missing(driver=driver, web=web)
+    def available(cls, *, driver: bool = False, web: bool = False, message_bus: str | None = None,
+                  auth: bool = True) -> bool:
+        return not cls.missing(driver=driver, web=web, message_bus=message_bus, auth=auth)
 
     # ------------------------------------------------------------------ configuration
     def platform_config(self) -> str:
@@ -365,8 +384,11 @@ class PlatformCLI:
         self.vctl("config", "store", identity, name, str(path), *(["--csv"] if csv else []))
 
     def grant(self, identity: str, *rpc_capabilities: str) -> None:
-        """Add RPC capabilities to an agent's authorization (``vctl authz add agent``)."""
-        self.vctl("authz", "add", "agent", identity, "--rpc-capabilities", *rpc_capabilities)
+        """Add RPC capabilities to an agent's authorization, through the environment's auth adapter (for lib-auth,
+        ``vctl authz add agent``). Does nothing on a platform with auth disabled."""
+        from volttrontesting import adapters
+        name = adapters.selected_auth() if self.auth_enabled else adapters.NO_AUTH
+        adapters.adapter_class("auth", name)().grant(self, identity, rpc_capabilities)
 
     def add_web_user(self, username: str, password: str, groups: Iterable[str] = ("admin", "vui")) -> None:
         self.python("from volttron.services.web.user_manager import add_web_user; "

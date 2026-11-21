@@ -49,8 +49,6 @@ import yaml
 # from .agent_additions import add_volttron_central, add_volttron_central_platform
 from gevent.fileobject import FileObject
 from gevent.subprocess import Popen
-from volttron.auth import auth_service
-from volttron.auth.auth_service import ServerOptions, VolttronAuthService
 from volttron.client.known_identities import (
     AUTH,
     CONTROL,
@@ -77,12 +75,12 @@ from volttron.utils import (
 from volttron.utils.certs import Certs
 from volttron.utils.commands import is_volttron_running, wait_for_volttron_startup
 
-# from volttrontesting.fixtures.rmq_test_setup import create_rmq_volttron_setup
 # from volttron.utils.rmq_setup import start_rabbit, stop_rabbit
 # from volttron.utils.rmq_setup import setup_rabbitmq_volttron
 from volttron.utils.context import ClientContext as cc
 
 #from volttron.client.vip.agent.connection import Connection
+from volttrontesting.adapters import NO_AUTH, AdapterError, adapter_class, auth_supports, selected_auth
 from volttrontesting.platform_cli import PlatformCLI
 from volttrontesting.utils import (
     get_hostname_and_random_port,
@@ -309,8 +307,10 @@ class PlatformWrapper:
         Creates a temporary VOLTTRON_HOME directory with a packaged directory
         for agents that are built.
 
-        :param messagebus: rmq or zmq - determines which dependencies to install
-        :param ssl_auth: if message_bus=rmq, authenticate users if True
+        :param messagebus: a bus with a registered adapter (``volttrontesting.adapters.available('bus')``; ``zmq`` by
+            default), or ``mock`` for the in-process TestServer. An unavailable bus raises ``AdapterError``.
+        :param ssl_auth: enable the platform's authentication and authorization (``auth-enabled``), with the
+            environment's auth module (``volttrontesting.adapters.selected_auth()``)
         """
 
         # This is hopefully going to keep us from attempting to shutdown
@@ -327,7 +327,17 @@ class PlatformWrapper:
         # gone keeps reconnecting, and with such agents alive the next instance's agents never connect (seen with the
         # pubsub and vctl modules, which build agents they do not stop).
         self._built_agents = []
-        self._core_builder = None    # this wrapper's ZmqCoreBuilder, see _zmq_core_builder
+        # The bus-specific steps of building agents in this process (credentials, agent core); None in mock mode.
+        # Found by name through the volttrontesting.message_buses entry points, see volttrontesting.buses.
+        self.bus = None if self.messagebus == 'mock' else adapter_class("bus", self.messagebus)()
+        # The authorization steps; the 'none' adapter when auth is disabled. The platform uses whichever auth module
+        # is installed, so with auth enabled this is the environment's one auth module (adapters.selected_auth).
+        if self.messagebus == 'mock':
+            self.auth = None
+        else:
+            self.auth = adapter_class("auth", selected_auth() if ssl_auth else NO_AUTH)()
+            if not auth_supports(self.auth.name, self.messagebus):
+                raise AdapterError(f"auth module {self.auth.name!r} does not support message bus {self.messagebus!r}")
 
         self.volttron_home = create_volttron_home()
 
@@ -448,7 +458,8 @@ class PlatformWrapper:
         # Starts, stops and talks to the platform (config, poetry setup, process, readiness, vctl, logs); this
         # wrapper adds agents built in the test process and several instances per session on top.
         self.cli = PlatformCLI(self.volttron_home, self.instance_name, auth_enabled=ssl_auth,
-                               agent_isolation_mode=agent_isolation_mode, env=self.env)
+                               agent_isolation_mode=agent_isolation_mode, env=self.env,
+                               message_bus=self.messagebus)
 
         with with_os_environ(self.env):
             from volttron.utils import ClientContext
@@ -494,50 +505,16 @@ class PlatformWrapper:
         print('{}: {}'.format(self.volttron_home, message))
 
     def _write_agent_credentials(self, identity: str, admin: bool = False):
-        """Write credentials and authz for *identity* directly to disk.
+        """Write credentials (the bus adapter) and authz (the auth adapter) for *identity* directly to disk.
 
-        This is the bootstrap path used when no dynamic_agent is connected
-        (e.g. pre-registering before the server starts, or building the first
-        agent).  If credentials already exist for *identity* they are reused;
-        only missing credentials are created.  Returns the Credentials object.
+        This is the bootstrap path used when no dynamic_agent is connected (pre-registering before the server starts,
+        or building the first agent), and the only path when auth is disabled. Existing credentials are reused.
+        Returns the credentials object.
         """
-        import volttron.types.auth.authz_types as _authz
-        from volttron.auth.authz_manager import VolttronAuthzManager
-        from volttron.auth.zap.credential_store import FileBasedCredentialStore
-        from volttron.auth.zap.credentials_creator import VolttronCredentialsCreator
-        from volttron.types.auth.auth_credentials import IdentityNotFound
-
         vhome = Path(self.volttron_home)
-        cred_store = FileBasedCredentialStore(
-            credentials_store_repository=vhome / "credentials_store"
-        )
-        try:
-            cred = cred_store.retrieve_credentials(identity=identity)
-            self.logit(f"Credentials already exist for {identity}")
-        except (IdentityNotFound, KeyError):
-            cred = VolttronCredentialsCreator().create(identity)
-            cred_store.store_credentials(credentials=cred)
-            self.logit(f"Created credentials for {identity}")
-        authz_mgr = VolttronAuthzManager(options=ServerOptions(volttron_home=vhome))
-        admin_caps = {}
-        if admin:
-            # Same as the server's "admin" role, inlined because that role isn't created until the server starts.
-            admin_caps = dict(
-                rpc_capabilities=_authz.RPCCapabilities([_authz.RPCCapability(resource="/.*/")]),
-                pubsub_capabilities=_authz.PubsubCapabilities(
-                    [_authz.PubsubCapability(topic_pattern="/.*/", topic_access="pubsub")]),
-            )
-        authz_mgr.create_or_merge_agent_authz(
-            identity=identity,
-            agent_roles=_authz.AgentRoles([
-                _authz.AgentRole(
-                    "default_rpc_capabilities",
-                    param_restrictions={"identity": identity}
-                )
-            ]),
-            comments=f"Registered by PlatformWrapper for {identity}",
-            **admin_caps
-        )
+        cred = self.bus.write_credentials(vhome, identity)
+        self.auth.write_authz(vhome, identity, admin=admin)
+        self.logit(f"Credentials and authz ready for {identity}")
         return cred
 
     # def get_agent_identity(self, agent_uuid):
@@ -629,21 +606,7 @@ class PlatformWrapper:
             if self.messagebus == 'mock':
                 return self._build_mock_agent(identity, address or self.address, agent_class, should_spawn, **kwargs)
             if publickey is None:
-                if self.messagebus == "zmq":
-                    from volttron.auth.zap.credential_store import (
-                        FileBasedCredentialStore,
-                    )
-                else:
-                    raise NotImplementedError(
-                        f"build_agent not yet implemented for messagebus: {self.messagebus}"
-                    )
-
-                volttron_home_path = Path(self.volttron_home)
-                cred_store = FileBasedCredentialStore(
-                    credentials_store_repository=volttron_home_path / "credentials_store"
-                )
-
-                if self.dynamic_agent is not None:
+                if self.dynamic_agent is not None and self.auth.enabled:
                     # A connected dynamic_agent already exists — delegate to the
                     # server's live AuthService via RPC.  This is the preferred
                     # path because it updates the server's in-memory credential
@@ -654,11 +617,11 @@ class PlatformWrapper:
                     ).get(timeout=10)
                     # get_credentials is not @RPC.export, so read the file that
                     # the server just wrote to get the Credentials object.
-                    agent_cred = cred_store.retrieve_credentials(identity=identity)
+                    agent_cred = self.bus.read_credentials(Path(self.volttron_home), identity)
                 else:
                     # Bootstrap path: no connected agent yet (we are creating
                     # dynamic_agent itself).  Write credentials and authz
-                    # directly to disk so the server's FileBasedCredentialStore
+                    # directly to disk so the server's credential store
                     # can pick them up.  We deliberately avoid resolving
                     # AuthService through service_repo here because that would
                     # pull in ZapAuthenticator as a constructor dependency,
@@ -679,7 +642,7 @@ class PlatformWrapper:
                                       volttron_home=self.volttron_home,
                                       enable_store=kwargs.pop('enable_store', False),
                                       **{k: kwargs.pop(k) for k in list(kwargs) if k in option_names})
-            with self._zmq_core_builder():
+            with self.bus.core_builder():
                 agent = agent_class(credentials=agent_cred,
                                     options=agent_opts, address=address)
             self.logit('platformwrapper.build_agent.address: {}'.format(address))
@@ -706,34 +669,6 @@ class PlatformWrapper:
         if json_output:
             return self.cli.vctl_json(*(args[1:] if args and args[0] == '--json' else args))
         return self.cli.vctl(*args)
-
-    @contextmanager
-    def _zmq_core_builder(self):
-        """Construct real agents with this wrapper's ``ZmqCoreBuilder``, and leave core's builder cache as it was.
-
-        ``Agent.__init__`` asks ``get_core_builder()`` for the process-wide cached builder. Once a mock-mode test has
-        imported ``volttrontesting.mock_core_builder`` the registry holds two builders, and an unnamed lookup either
-        cannot choose or hands a real agent a ``MockConnection``. The cache also wins over an explicit name, so a
-        builder left in it by one test is what every later agent gets, real or mock (volttron-core#361). The wrapper
-        therefore installs its own zmq builder only for the duration of the constructor and restores the previous
-        cache afterwards; all of a wrapper's agents share that one builder, as its constructor intends."""
-        from volttron.client import decorators
-        from volttron.server.containers import service_repo
-        import volttron.messagebus.zmq.zmq_core    # noqa: F401  registers ZmqCoreBuilder
-        # ZmqCoreBuilder takes the server's public key from the CredentialsStore in core's service registry when one
-        # resolves (lib-zmq registers it on import), and the registry caches the first instance. With several
-        # wrappers alive, agents built for one got the key of whichever platform resolved first and never connected.
-        # Resetting the cached instances here, inside this wrapper's environment, resolves the store for this home.
-        service_repo.reset_instances()
-        previous = decorators.__core_builder__
-        if self._core_builder is None:
-            decorators.__core_builder__ = None
-            self._core_builder = decorators.get_core_builder(name='ZmqCoreBuilder')
-        decorators.__core_builder__ = self._core_builder
-        try:
-            yield
-        finally:
-            decorators.__core_builder__ = previous
 
     def _stop_agent_core(self, agent, timeout=5):
         """Stop an in-process agent's core without touching the bus, and kill whatever is left after ``timeout``.
@@ -791,10 +726,10 @@ class PlatformWrapper:
 
     def add_capabilities(self, publickey, capabilities):
         """Capabilities are authz roles on the modular platform; ``auth.json`` and ``AuthFile`` no longer exist.
-        Grant them with ``vctl authz`` or ``VolttronAuthzManager.create_or_merge_agent_authz`` (see
-        ``_write_agent_credentials``)."""
+        Grant RPC capabilities with ``self.cli.grant(identity, *capabilities)``, which goes through the auth
+        adapter."""
         raise NotImplementedError(
-            "PlatformWrapper.add_capabilities: use vctl authz or VolttronAuthzManager on the modular platform")
+            "PlatformWrapper.add_capabilities: use wrapper.cli.grant(identity, *rpc_capabilities) on the modular platform")
 
     @staticmethod
     def add_capability(entry, capabilites):
@@ -961,12 +896,10 @@ class PlatformWrapper:
             # the server's in-memory authz map already contains "dynamic_agent"
             # when the agent connects, avoiding a ValueError in the
             # ConfigStore._onconfig background greenlet.
-            if self.messagebus == "zmq":
-                self._write_agent_credentials("dynamic_agent", admin=True)
+            self._write_agent_credentials("dynamic_agent", admin=True)
 
             self.cli.launch(timeout)
-            cred_path = Path(os.environ['VOLTTRON_HOME']).expanduser() / f"credentials_store/{PLATFORM}.json"
-            self.serverkey = VolttronCredentials.load_from_file(cred_path)
+            self.serverkey = self.bus.server_credentials(Path(self.volttron_home))
             assert self.serverkey
             self.logit(f"Server platform publickey: {self.serverkey.publickey}")
 
@@ -1567,29 +1500,8 @@ class PlatformWrapper:
     def cleanup(self):
         """
         Cleanup all resources created for test purpose if debug_mode is false.
-        Restores orignial rabbitmq.conf if volttrontesting with rmq
         :return:
         """
-
-        def stop_rabbit_node():
-            """
-            Stop RabbitMQ Server
-            :param rmq_home: RabbitMQ installation path
-            :param env: Environment to run the RabbitMQ command.
-            :param quite:
-            :return:
-            """
-            _log.debug("Stop RMQ: {}".format(self.volttron_home))
-            cmd = [
-                os.path.join(self.rabbitmq_config_obj.rmq_home, "sbin/rabbitmqctl"), "stop", "-n",
-                self.rabbitmq_config_obj.node_name
-            ]
-            execute_command(cmd, env=self.env)
-            gevent.sleep(2)
-            _log.info("**Stopped rmq node: {}".format(self.rabbitmq_config_obj.node_name))
-
-        if self.messagebus == 'rmq':
-            stop_rabbit_node()
 
         if not self.debug_mode:
             shutil.rmtree(self.volttron_home, ignore_errors=True)

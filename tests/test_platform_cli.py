@@ -83,10 +83,14 @@ def test_explicit_web_options_are_kept(tmp_path):
 
 
 def test_missing_reports_what_the_environment_lacks(monkeypatch):
+    from volttrontesting import adapters
     monkeypatch.setattr(platform_cli, '_installed', lambda name: False)
+    monkeypatch.setattr(adapters, '_installed', lambda name: False)
+    adapters._load.cache_clear()
     monkeypatch.setattr(platform_cli.importlib.util, 'find_spec', lambda name: None)
     missing = PlatformCLI.missing(driver=True, web=True)
     assert any('message bus' in m for m in missing) and any('Platform Driver' in m for m in missing)
+    assert any('auth module' in m for m in missing)
     assert 'volttron-lib-web' in missing and not PlatformCLI.available()
 
 
