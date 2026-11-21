@@ -4,7 +4,7 @@
 VOLTTRON Testing
 ================
 
-`volttron-testing <https://pypi.org/project/volttron-testing/>`_ provides classes and pytest fixtures for testing
+`volttron-testing <https://pypi.org/project/volttron-testing/>`__ provides classes and pytest fixtures for testing
 VOLTTRON agents and libraries at three levels:
 
 * **In process.** ``TestServer`` connects an agent instance to an in-memory server, so a test can trigger lifecycle
