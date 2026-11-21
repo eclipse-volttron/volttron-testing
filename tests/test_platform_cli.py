@@ -165,3 +165,46 @@ def test_two_platforms_side_by_side_and_an_agent(tmp_path):
         first.restart_agent('listener', 'listener')
         assert first.wait_for_log(r'listener', timeout=60, since=since)
     assert first.process is None and second.process is None
+
+
+# ---------------------------------------------------------------------------- prepare / launch / vctl_json
+def test_prepare_keeps_the_recorded_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(platform_cli, 'environment_project', lambda exclude=(): 'pinned project\n')
+    cli = PlatformCLI(tmp_path / 'volttron_home', 'prep')
+    cli.prepare()
+    assert (cli.home / 'pyproject.toml').read_text() == 'pinned project\n'
+    assert 'instance-name = prep' in (cli.home / 'config').read_text()
+    (cli.home / 'pyproject.toml').write_text('pinned project\n"an-installed-agent" = "1.0"\n')    # what the platform records
+    cli.instance_name = 'renamed'
+    cli.prepare()
+    assert 'an-installed-agent' in (cli.home / 'pyproject.toml').read_text()       # a restart keeps installed agents
+    assert 'instance-name = renamed' in (cli.home / 'config').read_text()          # the config follows the settings
+
+
+def test_env_base_is_used(tmp_path):
+    cli = PlatformCLI(tmp_path / 'h', env={'PATH': '/opt/bin', 'MARKER': 'from the wrapper'})
+    assert cli.env['MARKER'] == 'from the wrapper' and cli.env['PATH'].endswith(':/opt/bin')
+    assert cli.env['VOLTTRON_HOME'] == str(tmp_path / 'h')
+
+
+def test_monitor_frequency_in_config(tmp_path):
+    assert 'agent-monitor-frequency = 30' in PlatformCLI(tmp_path / 'h', agent_monitor_frequency=30).platform_config()
+
+
+@pytest.mark.parametrize('output, expected', [
+    ('{\n    "agent_uuid": "u1"\n}\n', {'agent_uuid': 'u1'}),
+    ('Installing from wheel /x.whl\n{\n    "agent_uuid": "u2"\n}\n', {'agent_uuid': 'u2'}),     # volttron-core#364
+    ('[{"a": 1}]', [{'a': 1}]),
+])
+def test_vctl_json(tmp_path, monkeypatch, output, expected):
+    run, calls = _fake_run([output])
+    monkeypatch.setattr(PlatformCLI, '_run', run)
+    assert PlatformCLI(tmp_path / 'h').vctl_json('install', '/x.whl') == expected
+    assert calls[0][:2] == ['vctl', '--json']
+
+
+def test_vctl_json_without_a_document(tmp_path, monkeypatch):
+    run, _ = _fake_run(['Agent installed\n'])
+    monkeypatch.setattr(PlatformCLI, '_run', run)
+    with pytest.raises(PlatformError, match='no JSON document'):
+        PlatformCLI(tmp_path / 'h').vctl_json('status')

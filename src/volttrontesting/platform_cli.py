@@ -134,7 +134,7 @@ class PlatformCLI:
     def __init__(self, home: str | Path, instance_name: str = "volttron-test", *, address: str | None = None,
                  web: WebOptions | bool | None = None, rpc_allow_list: Iterable[str] = (), message_bus: str = "zmq",
                  auth_enabled: bool = True, agent_isolation_mode: bool = False, extra_config: str = "",
-                 exclude: Iterable[str] = ()):
+                 exclude: Iterable[str] = (), env: dict[str, str] | None = None, agent_monitor_frequency: int = 600):
         self.home = Path(home)
         self.instance_name = instance_name
         self.address = f"tcp://127.0.0.1:{free_port()}" if address == "auto" else address
@@ -150,11 +150,13 @@ class PlatformCLI:
         self.agent_isolation_mode = agent_isolation_mode
         self.extra_config = extra_config
         self.exclude = list(exclude)
+        self.agent_monitor_frequency = agent_monitor_frequency
         self.log = self.home.parent / "volttron.log"
         self.stdout = self.home.parent / "volttron.stdout"
         self.bin = Path(sys.executable).parent
-        self.env = {**os.environ, "VOLTTRON_HOME": str(self.home), "VIRTUAL_ENV": str(self.bin.parent),
-                    "PATH": f"{self.bin}:{os.environ.get('PATH', '')}",
+        base = dict(os.environ if env is None else env)
+        self.env = {**base, "VOLTTRON_HOME": str(self.home), "VIRTUAL_ENV": str(self.bin.parent),
+                    "PATH": f"{self.bin}:{base.get('PATH', '')}",
                     "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
         self.process: subprocess.Popen | None = None
 
@@ -181,7 +183,7 @@ class PlatformCLI:
         lines = ["[volttron]", f"instance-name = {self.instance_name}",
                  f"agent-isolation-mode = {self.agent_isolation_mode}", f"messagebus = {self.message_bus}",
                  f"auth-enabled = {self.auth_enabled}", "server-messagebus-id = vip.server",
-                 "agent-monitor-frequency = 600"]
+                 f"agent-monitor-frequency = {self.agent_monitor_frequency}"]
         if self.address:
             lines.append(f"address = {self.address}")
         if self.web is not None:
@@ -202,15 +204,32 @@ class PlatformCLI:
 
     # ------------------------------------------------------------------ lifecycle
     def start(self, timeout: float = 480.0) -> "PlatformCLI":
-        """Start the platform and wait until vctl can talk to it (and the web server answers, with ``web``).
+        """Prepare the home and launch the platform: :meth:`prepare` then :meth:`launch`."""
+        self.prepare()
+        return self.launch(timeout)
 
-        The first start in a new home takes a minute or two while the platform locks the poetry project.
+    def prepare(self) -> "PlatformCLI":
+        """Write the platform config, and on the first start the poetry config and the pinned project.
+
+        The project (:func:`environment_project`) and ``poetry.toml`` are written only if absent: the platform records
+        installed agents in that project, so a restart in the same home must keep it. Callers that need files in the
+        home before the platform starts (credentials, service config) write them between ``prepare`` and ``launch``.
         """
         self.home.mkdir(parents=True, exist_ok=True)
         (self.home / "config").write_text(self.platform_config())
-        (self.home / "poetry.toml").write_text(POETRY_LOCAL_CONFIG)
-        (self.home / "pyproject.toml").write_text(environment_project(self.exclude))
-        with open(self.stdout, "w") as out:
+        if not (self.home / "poetry.toml").exists():
+            (self.home / "poetry.toml").write_text(POETRY_LOCAL_CONFIG)
+        if not (self.home / "pyproject.toml").exists():
+            (self.home / "pyproject.toml").write_text(environment_project(self.exclude))
+        return self
+
+    def launch(self, timeout: float = 480.0) -> "PlatformCLI":
+        """Start the platform process and wait until ``vctl status`` answers (and the web server, with ``web``).
+
+        ``vctl status`` succeeding proves the router, the control service and the control credentials all work; a
+        call costs about 0.35 s and a platform typically answers 3 to 7 s after launch.
+        """
+        with open(self.stdout, "a") as out:
             self.process = subprocess.Popen([str(self.bin / "volttron"), "-vv", "-l", str(self.log)], env=self.env,
                                             cwd=str(self.home.parent), stdout=out, stderr=subprocess.STDOUT)
         deadline = time.time() + timeout
@@ -219,7 +238,7 @@ class PlatformCLI:
                 raise PlatformError(f"platform exited with {self.process.returncode}:\n{self.log_tail()}")
             if self._run(["vctl", "status"], check=False, timeout=30).returncode == 0 and self._web_up():
                 return self
-            time.sleep(3)
+            time.sleep(1)
         raise PlatformError(f"platform did not become ready within {timeout}s:\n{self.log_tail()}")
 
     def _web_up(self) -> bool:
@@ -285,6 +304,18 @@ class PlatformCLI:
 
     def vctl(self, *args, timeout: float = 180.0) -> str:
         return self._run(["vctl", *args], timeout=timeout).stdout
+
+    def vctl_json(self, *args, timeout: float = 180.0):
+        """Run ``vctl --json <args>`` and return the parsed JSON document.
+
+        Tolerates lines printed before the document: ``vctl --json install`` prints progress messages first
+        (volttron-core#364).
+        """
+        output = self.vctl("--json", *args, timeout=timeout)
+        starts = [i for i in (output.find("{"), output.find("[")) if i >= 0]
+        if not starts:
+            raise PlatformError(f"no JSON document in the output of vctl --json {' '.join(map(str, args))}: {output!r}")
+        return json.JSONDecoder().raw_decode(output[min(starts):])[0]
 
     def python(self, code: str, timeout: float = 60.0) -> str:
         """Run a snippet with the platform's environment (``VOLTTRON_HOME`` set)."""
