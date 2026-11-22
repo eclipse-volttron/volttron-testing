@@ -22,6 +22,7 @@
 # ===----------------------------------------------------------------------===
 # }}}
 import copy
+import json
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,30 @@ import yaml
 from volttron.utils import execute_command, jsonapi
 
 from volttrontesting.platformwrapper import PlatformWrapper, with_os_environ
+
+# Known volttron-core behaviours these tests check for; the markers are strict, so they fail once core is fixed and
+# then have to be removed.
+VCTL_JSON_PROGRESS_LINE = pytest.mark.xfail(
+    raises=json.JSONDecodeError, strict=True,
+    reason="volttron-core#364: vctl --json install prints a progress line before the JSON document")
+VCTL_MISSING_WHEEL_LOOKED_UP_ON_PYPI = pytest.mark.xfail(
+    raises=AssertionError, strict=True,
+    reason="volttron-core#365: vctl install of a .whl path that does not exist is treated as a PyPI package")
+
+
+@pytest.fixture(autouse=True)
+def no_leftover_agents(request):
+    """Remove every installed agent after each test, so a test that fails after installing cannot make the next
+    test's installs collide (same identity or tag) or its status checks see stray agents."""
+    yield
+    if "volttron_instance" not in request.fixturenames:
+        return
+    instance = request.getfixturevalue("volttron_instance")
+    if instance.is_running():
+        try:
+            instance.remove_all_agents()
+        except Exception as e:      # the platform may be mid-restart; the next test's cleanup retries
+            print(f"cleanup: could not remove agents: {e}")
 
 test_agent_dir = None
 
@@ -76,10 +101,11 @@ authors = ["VOLTTRON Team"]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
-volttron = ">=10.0.3a9,<11.0"
+volttron-core = ">=2.0.0rc16"
 
 [tool.poetry.scripts]
-test-agent = "testagent.agent:main"
+# the platform starts an agent through the console script named after its package
+testagent = "testagent.agent:main"
 """)
     print(f"Created test agent dir at {test_agent_dir}")
     execute_command(["poetry", "build"], cwd=test_agent_dir, env=volttron_instance.env)
@@ -132,7 +158,6 @@ def test_peerlist_with_connection(volttron_instance: PlatformWrapper):
         assert peers == expected_peers
 
 
-@pytest.mark.skip(reason="fix vctl list")
 @pytest.mark.control
 def test_no_connection():
     # Test command that doesn't need instance running.
@@ -143,10 +168,9 @@ def test_no_connection():
                          env=wrapper.env)
     stdout, stderr = p.communicate()
 
-    try:
-        assert "No installed Agents found" in stderr.decode("utf-8")
-    except AssertionError:
-        assert not stderr.decode("utf-8")
+    # A home that has never been started has no config file; vctl says so and asks for a first start.
+    output = stdout.decode("utf-8") + stderr.decode("utf-8")
+    assert "does not have a config file" in output and "start VOLTTRON at least once" in output, output
 
 
 @pytest.mark.skipif(
@@ -155,6 +179,7 @@ def test_no_connection():
                     See https://github.com/eclipse-volttron/volttron-testing/issues/39 for clarity"""
 )
 @pytest.mark.control
+@VCTL_JSON_PROGRESS_LINE
 def test_install_same_identity(volttron_instance: PlatformWrapper):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
@@ -223,6 +248,7 @@ def test_install_same_identity(volttron_instance: PlatformWrapper):
 
 
 @pytest.mark.control
+@VCTL_JSON_PROGRESS_LINE
 def test_install_with_wheel(volttron_instance: PlatformWrapper):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
@@ -235,6 +261,7 @@ def test_install_with_wheel(volttron_instance: PlatformWrapper):
 
 
 @pytest.mark.control
+@VCTL_MISSING_WHEEL_LOOKED_UP_ON_PYPI
 def test_install_with_wheel_bad_path(volttron_instance: PlatformWrapper):
     with with_os_environ(volttron_instance.env):
         bad_wheel_path = "foo/wheel.whl"
@@ -251,6 +278,7 @@ def test_install_with_wheel_bad_path(volttron_instance: PlatformWrapper):
 ], ["--tag", "enabled_agent", "--enable"], ["--tag", "autostart_agent", "--priority", "10"
                                             ], [], ["--vip-identity", "ralph"]))
 @pytest.mark.parametrize("use_config", [False, True])
+@VCTL_JSON_PROGRESS_LINE
 def test_install_arg_matrix(volttron_instance: PlatformWrapper, args: List, use_config: bool):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
@@ -336,7 +364,6 @@ def test_install_arg_matrix(volttron_instance: PlatformWrapper, args: List, use_
         volttron_instance.remove_all_agents()
 
 
-@pytest.mark.skip(message="issue #146. vctl list fails")
 @pytest.mark.control
 def test_agent_filters(volttron_instance):
     global test_agent_dir
@@ -356,17 +383,19 @@ def test_agent_filters(volttron_instance):
         assert "testagent-0.1.0_1" in str(agent_list)
         assert "testagent-0.1.0_2" not in str(agent_list)
 
-    # Filter agent based on agent name
+    # Filter agent based on agent name. vctl list matches names (and uuids and tags), not identities; both instances
+    # of the package share the name testagent-0.1.0, so the name selects both.
     with with_os_environ(volttron_instance.env):
-        agent_list = execute_command(["volttron-ctl", "list", "testagent-0.1.0_1"],
+        agent_list = execute_command(["volttron-ctl", "list", "testagent-0.1.0"],
                                      env=volttron_instance.env)
         assert "testagent-0.1.0_1" in str(agent_list)
-        assert "testagent-0.1.0_2" not in str(agent_list)
+        assert "testagent-0.1.0_2" in str(agent_list)
 
     volttron_instance.remove_all_agents()
 
 
 @pytest.mark.control
+@VCTL_JSON_PROGRESS_LINE
 def test_vctl_start_stop_restart_by_uuid_should_succeed(volttron_instance: PlatformWrapper):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
@@ -414,6 +443,7 @@ def test_vctl_start_stop_restart_by_uuid_should_succeed(volttron_instance: Platf
 
 
 @pytest.mark.control
+@VCTL_JSON_PROGRESS_LINE
 def test_vctl_start_stop_restart_by_tag_should_succeed(volttron_instance: PlatformWrapper):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
@@ -463,6 +493,7 @@ def test_vctl_start_stop_restart_by_tag_should_succeed(volttron_instance: Platfo
 
 
 @pytest.mark.control
+@VCTL_JSON_PROGRESS_LINE
 def test_vctl_start_stop_restart_by_all_tagged_should_succeed(volttron_instance: PlatformWrapper):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
@@ -576,6 +607,7 @@ def test_vctl_start_stop_restart_all_tagged_when_no_agents_are_installed(
 
 
 @pytest.mark.parametrize("subcommand", [("enable", ), ("enable", "-p", "10"), ("disable", )])
+@VCTL_JSON_PROGRESS_LINE
 def test_vctl_enable_disable_success(volttron_instance: PlatformWrapper, subcommand):
     global test_agent_dir
     with with_os_environ(volttron_instance.env):
