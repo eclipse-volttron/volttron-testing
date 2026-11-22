@@ -206,13 +206,19 @@ class TestServerPlatform(_DriverPoints):
     """Agents run in the test process on a TestServer with RPC routing and a configuration store.
 
     Agents are built as vip_main builds them, with credentials for their identity and the path of their agent
-    config, on MockCoreBuilder cores. The log is every record logged in the process (all loggers, not only the
+    config, on MockCoreBuilder cores. Creating one gevent-patches the test process, as importing an agent would. The log is every record logged in the process (all loggers, not only the
     agents'), from INFO, as a platform's volttron.log would hold.
     """
     __test__ = False
     backend = "testserver"
 
     def __init__(self, log_level: int = logging.INFO):
+        # Agents' modules gevent-patch the process when imported (volttron.client.commands patches everything).
+        # Patching first time inside a nested import swaps the lock the import machinery holds ("cannot release
+        # un-acquired lock"), so the process is patched here, before any agent module is imported.
+        from gevent import monkey
+        if not monkey.is_module_patched("threading"):
+            monkey.patch_all()
         from volttrontesting.server_mock import TestServer
         self.server = TestServer(route_rpc=True, run_schedules=True)
         self._factories: dict[str, Callable[[], Any]] = {}

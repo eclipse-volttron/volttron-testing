@@ -38,8 +38,8 @@ Fixtures (scope ``module`` by default; see ``volttron_platform_scope``):
     A separate started ``PlatformCLI`` with the web service and a web user (``web_platform.web_user``). Options from
     ``web_platform_options``, the user from ``web_user``.
 ``platform_driver``
-    The Platform Driver installed on ``platform_cli``, as a :class:`DriverHandle`. ``install_platform_driver(cli)``
-    does the same for any platform, for example ``web_platform``.
+    The Platform Driver installed on ``platform`` (any backend), as a :class:`DriverHandle`.
+    ``install_platform_driver(cli)`` does the same for any platform, for example ``web_platform``.
 ``certs``
     A :class:`~volttrontesting.certs.CertificateSet` in a temporary directory (function scope).
 ``platform``
@@ -60,6 +60,7 @@ import csv
 import json
 import os
 import secrets
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -72,7 +73,8 @@ __all__ = ["DriverHandle", "WebUser", "install_platform_driver", "platform_scope
 SKIP_ENV = "VOLTTRON_TESTING_SKIP_PLATFORM"
 SCOPE_OPTION = "volttron_platform_scope"
 SCOPES = ("module", "package", "session")
-PLATFORM_FIXTURES = ("platform_cli", "web_platform", "platform_driver")
+PLATFORM_FIXTURES = ("platform_cli", "web_platform")
+# platform and platform_driver are marked platform only on a real-platform backend (pytest_collection_modifyitems).
 # Tests using these legacy wrapper fixtures also start real platforms, so they are marked ``platform`` too.
 LEGACY_PLATFORM_FIXTURES = ("volttron_instance", "platforms")
 
@@ -260,15 +262,27 @@ class WebUser:
 
 @dataclass
 class DriverHandle:
-    """The Platform Driver on a platform: store registries and device configs, read and write points."""
+    """The Platform Driver on a platform: store registries and device configs, read and write points. ``cli`` is
+    a PlatformCLI or any platform under test (volttrontesting.platform_protocol); ``platform`` is the same object."""
     cli: object
     identity: str = "platform.driver"
     _files: Path = field(default=None, repr=False)
 
     def __post_init__(self):
         if self._files is None:
-            self._files = Path(self.cli.home).parent / "driver_configs"
+            home = getattr(self.cli, "home", None)
+            self._files = Path(home).parent / "driver_configs" if home else Path(tempfile.mkdtemp()) / "driver_configs"
         self._files.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def platform(self):
+        return self.cli
+
+    def _store(self, name: str, path: Path, kind: str) -> None:
+        if hasattr(self.cli, "backend"):                    # a platform under test
+            self.cli.store_config(self.identity, name, path, kind=kind)
+        else:
+            self.cli.store_config(self.identity, name, path, csv=(kind == "csv"))
 
     def store_registry(self, name: str, rows_or_path: Iterable[dict] | str | Path) -> None:
         """Store a registry CSV under ``name`` (for example ``registry_configs/meter.csv``), from a file or rows."""
@@ -281,7 +295,7 @@ class DriverHandle:
                 writer = csv.DictWriter(f, fieldnames=list(rows[0]))
                 writer.writeheader()
                 writer.writerows(rows)
-        self.cli.store_config(self.identity, name, path, csv=True)
+        self._store(name, path, "csv")
 
     def store_device(self, topic: str, config: dict | str | Path) -> None:
         """Store a device config as ``devices/<topic>``, from a file or a dict."""
@@ -290,7 +304,7 @@ class DriverHandle:
         else:
             path = self._files / (topic.replace("/", "__") + ".json")
             path.write_text(json.dumps(config))
-        self.cli.store_config(self.identity, f"devices/{topic}", path)
+        self._store(f"devices/{topic}", path, "json")
 
     def get(self, topic: str):
         return self.cli.get_point(topic)
@@ -304,12 +318,16 @@ class DriverHandle:
 
 def install_platform_driver(cli, source=None, *, anchor=None, identity: str = "platform.driver",
                             tag: str = "driver") -> DriverHandle:
-    """Install the Platform Driver on a started platform and return its handle. ``source`` defaults to
-    ``AgentSources(anchor=anchor).resolve("platform-driver")``: the checkout when one is found, else PyPI."""
+    """Install the Platform Driver on a started platform (a PlatformCLI or a platform under test) and return its
+    handle. ``source`` defaults to ``AgentSources(anchor=anchor).resolve("platform-driver")``: the checkout when
+    one is found, else PyPI."""
     if source is None:
         from volttrontesting.configs import AgentSources
         source = AgentSources(anchor=anchor).resolve("platform-driver")
-    cli.install_agent(source, vip_identity=identity, tag=tag)
+    if hasattr(cli, "backend"):
+        cli.install_agent(source, identity, tag)
+    else:
+        cli.install_agent(source, vip_identity=identity, tag=tag)
     return DriverHandle(cli, identity)
 
 
@@ -354,9 +372,11 @@ def web_platform(request, tmp_path_factory, web_platform_options, web_user):
 
 
 @pytest.fixture(scope=platform_scope)
-def platform_driver(request, platform_cli) -> DriverHandle:
-    require_platform(driver=True)
-    return install_platform_driver(platform_cli, anchor=request.config.rootpath)
+def platform_driver(request, platform) -> DriverHandle:
+    """The Platform Driver installed on ``platform``, on whichever backend the test runs."""
+    if platform.backend != "testserver":
+        require_platform(driver=True)
+    return install_platform_driver(platform, anchor=request.config.rootpath)
 
 
 @pytest.fixture
