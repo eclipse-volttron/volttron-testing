@@ -214,7 +214,7 @@ class TestServerPlatform(_DriverPoints):
 
     def __init__(self, log_level: int = logging.INFO):
         from volttrontesting.server_mock import TestServer
-        self.server = TestServer(route_rpc=True)
+        self.server = TestServer(route_rpc=True, run_schedules=True)
         self._factories: dict[str, Callable[[], Any]] = {}
         self._files = Path(tempfile.mkdtemp(prefix="volttrontesting-testserver-"))
         self._log = _LogBuffer()

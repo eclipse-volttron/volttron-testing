@@ -141,8 +141,11 @@ class TestServer:
     __schedule_wrappers__: Dict[str, ScheduleWrapper]
     __scheduled_events__: Dict[str, List[ScheduledEvent]]
 
-    def __init__(self, route_rpc: bool = False):
+    def __init__(self, route_rpc: bool = False, run_schedules: bool = False):
         """
+        :param run_schedules: run what connected agents schedule with ``core.schedule`` at its deadline, as a
+            platform's core does (LiveScheduleWrapper). Off by default: ScheduleWrapper records the events and a
+            test triggers them.
         :param route_rpc: route connected agents' ``vip.rpc.call`` and ``notify`` through this server (RPCWrapper):
             to other connected agents' exported methods, and to the server's configuration store
             (``config_store``, a ConfigStoreWrapper), so agents receive the configs a test stores. Off by default,
@@ -150,6 +153,7 @@ class TestServer:
         """
         # Each server's state is its own: a second TestServer no longer resets a live one.
         self.route_rpc = route_rpc
+        self.run_schedules = run_schedules
         self.config_store = ConfigStoreWrapper(self)
         self.__rpc_wrappers__ = {}
         self.__connected_agents__ = {}
@@ -394,7 +398,7 @@ class TestServer:
         self.__pubsub_wrappers__[agent.core.identity] = PubSubWrapper(agent, self)
         
         # Set up schedule wrapper
-        schedule_wrapper = ScheduleWrapper(agent.core.identity, self)
+        schedule_wrapper = (LiveScheduleWrapper if self.run_schedules else ScheduleWrapper)(agent.core.identity, self)
         self.__schedule_wrappers__[agent.core.identity] = schedule_wrapper
         # Attach schedule wrapper to agent's core
         agent.core._schedule_wrapper = schedule_wrapper
@@ -405,15 +409,16 @@ class TestServer:
 
     def start_agent(self, agent: Agent, logger: Optional[Logger] = None) -> Agent:
         """Connect an agent and run a platform's startup sequence on it: its ``onsetup`` and ``onstart`` methods
-        (those it defines), then the configuration event, which delivers its stored configs when ``route_rpc`` is
-        on. Returns the agent."""
+        (those it defines), then, when ``route_rpc`` is on, the configuration event, which delivers its stored
+        configs. Returns the agent."""
         self.connect_agent(agent, logger)
         self.__subscribe_decorated__(agent)
         members = self.__lifecycle_methods__[agent.core.identity]
         for member in (LifeCycleMembers.onsetup, LifeCycleMembers.onstart):
             if member in members:
                 __execute_lifecycle_method__(agent.core.identity, member, members=members, sender='')
-        self.trigger_configuration_event(agent)
+        if self.route_rpc:                  # without routing there is no store to answer the agent's request
+            self.trigger_configuration_event(agent)
         return agent
 
     def __subscribe_decorated__(self, agent: Agent) -> None:
@@ -439,6 +444,9 @@ class TestServer:
         configuration updates or published messages, and another agent may connect with its identity."""
         identity = _identity_of(identity_or_agent)
         self.__check_connected__(identity)
+        schedule = self.__schedule_wrappers__.get(identity)
+        if isinstance(schedule, LiveScheduleWrapper):
+            schedule.cancel_all()
         for registry in (self.__connected_agents__, self.__lifecycle_methods__, self.__pubsub_wrappers__,
                          self.__schedule_wrappers__, self.__rpc_wrappers__):
             registry.pop(identity, None)
@@ -635,6 +643,51 @@ class ScheduleWrapper(SubSystemWrapper):
             event.cancelled = True
             if event.greenlet:
                 event.greenlet.kill()
+
+
+class LiveScheduleWrapper(SubSystemWrapper):
+    """``core.schedule`` as a platform's core runs it: ``schedule(deadline, func, *args, **kwargs)``, where the
+    deadline is a datetime, a timestamp, or an iterator of them (``periodic(...)``), calls ``func`` at each deadline
+    and returns core's own ScheduledEvent, whose ``cancel()`` stops it. A callback's exception is logged, as core's
+    schedule loop does, and does not stop later deadlines."""
+
+    def __init__(self, identity: str, test_server: 'TestServer'):
+        super().__init__()
+        self._identity = identity
+        self._greenlets: set = set()
+
+    def __call__(self, deadline, func: Callable, *args, **kwargs):
+        from volttron.client.vip.agent.core import ScheduledEvent
+        from volttron.utils.time import get_utc_seconds_from_epoch
+        import time as _time
+        event = ScheduledEvent(func, args, kwargs)
+        try:
+            deadlines = iter(deadline)
+        except TypeError:
+            deadlines = iter([deadline])
+
+        def run():
+            for when in deadlines:
+                delay = get_utc_seconds_from_epoch(when) - _time.time()
+                if delay > 0:
+                    gevent.sleep(delay)
+                if event.canceled:
+                    break
+                try:
+                    func(*args, **kwargs)
+                except Exception:
+                    _log.exception(f'{self._identity}: scheduled callback {func!r} failed')
+            event.finished = True
+
+        greenlet = gevent.spawn(run)
+        self._greenlets.add(greenlet)
+        greenlet.link(self._greenlets.discard)
+        return event
+
+    def cancel_all(self):
+        """Stop everything this agent scheduled (its core stopping)."""
+        gevent.killall(list(self._greenlets))
+        self._greenlets.clear()
 
 
 class HeartBeatWrapper(SubSystemWrapper):

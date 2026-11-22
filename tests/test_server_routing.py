@@ -151,3 +151,26 @@ def test_store_errors_are_the_platforms(server):
         server.config_store.delete_config('configured', 'missing')
     with pytest.raises(ValueError):
         server.config_store.store('configured', 'loop', {'self': 'config://loop'})
+
+
+# ------------------------------------------------------------------------------------------------ live schedules
+
+def test_live_schedules_run_at_their_deadlines():
+    from datetime import datetime, timedelta
+    from volttron.client.vip.agent.core import ScheduledEvent
+    from volttron.utils.scheduling import periodic
+    server = TestServer(run_schedules=True)
+    agent = server.start_agent(Target('scheduler'))
+    calls = []
+    once = agent.core.schedule(datetime.now() + timedelta(seconds=0.1), calls.append, 'once')
+    repeating = agent.core.schedule(periodic(0.05), calls.append, 'tick')
+    cancelled = agent.core.schedule(datetime.now() + timedelta(seconds=0.1), calls.append, 'never')
+    cancelled.cancel()
+    assert isinstance(once, ScheduledEvent)
+    gevent.sleep(0.3)
+    repeating.cancel()
+    assert 'once' in calls and calls.count('tick') >= 3 and 'never' not in calls and once.finished
+    later = agent.core.spawn_later(0.05, calls.append, 'spawned')
+    later.join(timeout=1)
+    assert calls[-1] == 'spawned'
+    server.stop_agent(agent)                     # cancels what is left

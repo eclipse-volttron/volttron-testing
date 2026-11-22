@@ -160,6 +160,14 @@ class MockCore(CoreLoop):
         """Return a mock version string"""
         return "1.0.0-mock"
     
+    def spawn(self, func: Callable, *args, **kwargs):
+        """Run ``func`` in a greenlet, as core does."""
+        return gevent.spawn(func, *args, **kwargs)
+
+    def spawn_later(self, seconds: float, func: Callable, *args, **kwargs):
+        """Run ``func`` in a greenlet after ``seconds``, as core does."""
+        return gevent.spawn_later(seconds, func, *args, **kwargs)
+
     def register(self, subsystem: str, handle_subsystem: Callable, handle_error: Callable = None):
         """Register a subsystem handler"""
         self._subsystems[subsystem] = handle_subsystem

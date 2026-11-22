@@ -163,3 +163,78 @@ def test_an_unavailable_bus_skips_with_the_reason(inner):
 def test_platform_cli_fixture_starts_a_real_platform(platform_cli):
     assert platform_cli.process is not None
     platform_cli.vctl("status")
+
+
+# ------------------------------------------------------------------------------------- the platform fixture (step 7)
+BACKEND_TESTS = {
+    "test_backends": '''
+        import pytest
+
+        def test_unmarked(platform):
+            assert platform.backend == "testserver"
+
+        @pytest.mark.platform_backend("cli", "testserver")
+        def test_both(platform):
+            assert platform.backend in ("cli", "testserver")
+
+        @pytest.mark.platform_backend("cli")
+        def test_cli_only(platform):
+            assert platform.backend == "cli"
+
+        @pytest.mark.platform_backend("cli")
+        def test_cli_cannot_subscribe(platform):
+            platform.subscribe("x")
+        ''',
+}
+
+
+def _ids(result) -> set:
+    return {line.split("::")[1].split(" ")[0] for line in result.outlines if "::" in line
+            and (" PASSED" in line or " SKIPPED" in line or " FAILED" in line)}
+
+
+def test_each_test_runs_on_its_own_backends(inner):
+    result, starts = inner(BACKEND_TESTS, "-v")
+    assert _ids(result) == {"test_unmarked[testserver]", "test_both[cli-zmq-libauth]", "test_both[testserver]",
+                            "test_cli_only[cli-zmq-libauth]", "test_cli_cannot_subscribe[cli-zmq-libauth]"}
+    result.assert_outcomes(passed=4, skipped=1)               # NotSupported becomes a skip
+    result.stdout.fnmatch_lines(["*subscribe is not supported on the cli backend*"])
+    assert len(starts) == 1                                     # one module-scoped real platform
+
+
+def test_the_option_narrows_but_never_moves_a_test(inner):
+    result, starts = inner(BACKEND_TESTS, "-v", "--platform-backend=testserver")
+    assert _ids(result) == {"test_unmarked[testserver]", "test_both[testserver]", "test_cli_only[no-backend]",
+                            "test_cli_cannot_subscribe[no-backend]"}
+    result.assert_outcomes(passed=2, skipped=2)
+    result.stdout.fnmatch_lines(["*marked for cli; --platform-backend selects testserver*"])
+    assert starts == []
+
+
+def test_the_option_sets_the_backends_of_unmarked_tests(inner):
+    result, _starts = inner({"test_u": "def test_u(platform):\n    assert platform.backend == 'cli'\n"},
+                            "-v", "--platform-backend=cli")
+    result.assert_outcomes(passed=1)
+
+
+def test_an_unknown_backend_is_a_usage_error(inner):
+    result, _starts = inner({"test_u": "def test_u(platform):\n    pass\n"}, "--platform-backend=docker")
+    result.stderr.fnmatch_lines(["*unknown backend(s) docker*"])
+
+
+def test_a_repositorys_own_platform_fixture_is_left_alone(inner):
+    result, _starts = inner({"test_own": '''
+        import pytest
+
+        @pytest.fixture
+        def platform():
+            return object()
+
+        def test_one(platform):
+            pass
+
+        def test_two(platform):
+            pass
+        '''}, "-v")
+    result.assert_outcomes(passed=2)
+    result.stdout.fnmatch_lines(["*test_one PASSED*", "*test_two PASSED*"])      # no [testserver] id

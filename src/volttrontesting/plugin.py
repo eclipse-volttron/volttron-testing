@@ -42,6 +42,13 @@ Fixtures (scope ``module`` by default; see ``volttron_platform_scope``):
     does the same for any platform, for example ``web_platform``.
 ``certs``
     A :class:`~volttrontesting.certs.CertificateSet` in a temporary directory (function scope).
+``platform``
+    A platform under test (:mod:`volttrontesting.platform_protocol`) on one backend: ``testserver`` (in process),
+    ``cli`` (a real platform through vctl) or ``wrapper`` (a real platform through PlatformWrapper). A test or
+    module marked ``@pytest.mark.platform_backend("cli", ...)`` runs on those backends; an unmarked one on
+    ``testserver``. ``--platform-backend`` narrows a marked test to the listed backends among its own, and sets
+    the backends of unmarked tests; it never moves a test onto a backend it is not marked for. An operation a
+    backend cannot do raises ``NotSupported``, reported as a skip.
 
 Each platform fixture runs once per selected message bus (``--messagebus`` or ``VOLTTRON_TEST_MESSAGEBUS``, default
 every available bus) and skips, with the reason, when ``VOLTTRON_TESTING_SKIP_PLATFORM`` is set or the environment
@@ -76,6 +83,9 @@ def pytest_addoption(parser):
     group.addoption("--messagebus", dest="volttron_messagebus", default=None,
                     help="comma-separated message buses the platform fixtures run on (default: every available "
                     "bus; same as VOLTTRON_TEST_MESSAGEBUS)")
+    group.addoption("--platform-backend", dest="platform_backend", default=None,
+                    help="comma-separated backends of the platform fixture: testserver, cli, wrapper. Narrows tests "
+                    "marked platform_backend to these, and sets the backends of unmarked tests (default testserver)")
     group.addoption("--volttron-platform-scope", dest="volttron_platform_scope", choices=SCOPES, default=None,
                     help=f"scope of the platform fixtures (default: the {SCOPE_OPTION} ini value, else module)")
     parser.addini(SCOPE_OPTION, f"scope of the volttron-testing platform fixtures: {', '.join(SCOPES)}",
@@ -96,6 +106,9 @@ def pytest_configure(config):
     config.addinivalue_line("markers", f"platform: starts a real VOLTTRON platform (set {SKIP_ENV}=1 to skip)")
     config.addinivalue_line("markers", "docker: needs docker and the images the test names")
     config.addinivalue_line("markers", "slow: takes minutes")
+    config.addinivalue_line("markers", "platform_backend(*backends): the backends the platform fixture runs this "
+                            "test on (testserver, cli, wrapper)")
+    _selected_backends(config)              # reject an unknown backend at startup
     platform_scope("platform_cli", config)    # reject a bad scope value at startup, not at the first fixture
 
 
@@ -104,6 +117,22 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if names & set(getattr(item, "fixturenames", ())):
             item.add_marker(pytest.mark.platform)
+        param = getattr(getattr(item, "callspec", None), "params", {}).get("platform")
+        if isinstance(param, dict) and param.get("backend") != "testserver":
+            item.add_marker(pytest.mark.platform)       # a real platform: cli or wrapper
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Report an operation the platform fixture's backend cannot do (NotSupported) as a skip, with the reason."""
+    outcome = yield
+    report = outcome.get_result()
+    if call.excinfo is not None and report.failed:
+        from volttrontesting.platform_protocol import NotSupported
+        if isinstance(call.excinfo.value, NotSupported):
+            report.outcome = "skipped"
+            path, lineno, _ = item.reportinfo()
+            report.longrepr = (str(path), (lineno or 0) + 1, f"Skipped: {call.excinfo.value}")
 
 
 def pytest_generate_tests(metafunc):
@@ -117,7 +146,68 @@ def pytest_generate_tests(metafunc):
                                  scope=platform_scope(name, metafunc.config))
 
 
+    if "platform" in metafunc.fixturenames and _is_plugin_platform(metafunc) and not any(
+            m.args and m.args[0] == "platform" for m in metafunc.definition.iter_markers("parametrize")):
+        metafunc.parametrize("platform", _backend_params(metafunc), indirect=True,
+                             scope=platform_scope("platform", metafunc.config))
+
+
+def _is_plugin_platform(metafunc) -> bool:
+    """Whether the test's ``platform`` is this plugin's fixture. A repository that defines its own ``platform``
+    fixture (a conftest or the test module) keeps it, unparametrized and in its own scope."""
+    definitions = metafunc.definition._fixtureinfo.name2fixturedefs.get("platform") or ()
+    return bool(definitions) and getattr(definitions[-1].func, "__module__", None) == __name__
+
+
 _PARAMS = pytest.StashKey[list]()
+_BACKEND_PARAMS = pytest.StashKey[dict]()
+BACKENDS = ("testserver", "cli", "wrapper")
+
+
+def _selected_backends(config) -> list | None:
+    value = config.getoption("platform_backend", None)
+    if not value:
+        return None
+    names = [name.strip() for name in value.split(",") if name.strip()]
+    unknown = [name for name in names if name not in BACKENDS]
+    if unknown:
+        raise pytest.UsageError(f"--platform-backend: unknown backend(s) {', '.join(unknown)}; "
+                                f"choose from {', '.join(BACKENDS)}")
+    return names
+
+
+def _backend_params(metafunc) -> list:
+    """The platform fixture's parameters for one test (G5): the backends it is marked for, narrowed by
+    --platform-backend, or for an unmarked test the option's backends (default testserver). Real-platform backends
+    run once per selected message bus."""
+    marker = metafunc.definition.get_closest_marker("platform_backend")
+    option = _selected_backends(metafunc.config)
+    if marker is not None:
+        unknown = [name for name in marker.args if name not in BACKENDS]
+        if unknown:
+            raise pytest.UsageError(f"{metafunc.definition.nodeid}: platform_backend marks unknown backend(s) "
+                                    f"{', '.join(unknown)}")
+        backends = [name for name in marker.args if option is None or name in option]
+        if not backends:
+            return [pytest.param(None, id="no-backend", marks=pytest.mark.skip(
+                reason=f"marked for {', '.join(marker.args)}; --platform-backend selects {', '.join(option)}"))]
+    else:
+        backends = option or ["testserver"]
+    return [param for name in backends for param in _params_of(metafunc.config, name)]
+
+
+def _params_of(config, backend: str) -> list:
+    """The parameters of one backend, the same objects for every test (pytest reuses a wider-scoped fixture only
+    for an identical parameter)."""
+    cache = config.stash.setdefault(_BACKEND_PARAMS, {})
+    if backend not in cache:
+        if backend == "testserver":
+            cache[backend] = [pytest.param({"backend": "testserver"}, id="testserver")]
+        else:
+            cache[backend] = [pytest.param(None if p.values[0] is None else {"backend": backend, **p.values[0]},
+                                           id=f"{backend}-{p.id}", marks=p.marks)
+                              for p in _platform_params(config)]
+    return cache[backend]
 
 
 def _platform_params(config) -> list:
@@ -273,3 +363,30 @@ def platform_driver(request, platform_cli) -> DriverHandle:
 def certs(tmp_path):
     from volttrontesting.certs import CertificateSet
     return CertificateSet(tmp_path / "certs")
+
+
+@pytest.fixture(scope=platform_scope)
+def platform(request, tmp_path_factory, platform_cli_options):
+    """A platform under test on the backend of this test's parameter (see the module docstring)."""
+    param = request.param
+    backend = param["backend"]
+    if backend == "testserver":
+        from volttrontesting.platform_backends import TestServerPlatform
+        under_test = TestServerPlatform()
+    elif backend == "cli":
+        from volttrontesting.platform_backends import CliPlatform
+        under_test = CliPlatform(_started(request, tmp_path_factory, "platform", platform_cli_options))
+    else:
+        require_platform(message_bus=param.get("messagebus", "zmq"))
+        from volttrontesting.fixtures.volttron_platform_fixtures import build_wrapper, cleanup_wrapper
+        from volttrontesting.platform_backends import WrapperPlatform
+        from volttrontesting.utils import get_rand_vip
+        wrapper = build_wrapper(get_rand_vip(), messagebus=param.get("messagebus", "zmq"),
+                                ssl_auth=param.get("ssl_auth", True))
+        under_test = WrapperPlatform(wrapper)
+        under_test.shutdown = lambda: cleanup_wrapper(wrapper)
+    try:
+        yield under_test
+    finally:
+        under_test.shutdown()
+
