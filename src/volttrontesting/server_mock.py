@@ -35,10 +35,21 @@ from datetime import datetime
 
 from gevent.event import AsyncResult
 import gevent
+import csv
+import errno
+import io
+from types import SimpleNamespace
 
 from volttrontesting.memory_pubsub import MemoryPubSub, MemorySubscriber, PublishedMessage
 
+_log = logging.getLogger(__name__)
+
 from volttron.client import Agent
+from volttron.client.known_identities import CONFIGURATION_STORE
+from volttron.client.vip.agent.errors import Unreachable
+from volttron.utils import jsonapi, parse_json_config
+from volttron.utils.jsonrpc import METHOD_NOT_FOUND, MethodNotFound, RemoteError
+from volttron.utils.storeutils import check_for_recursion, strip_config_name
 
 
 @dataclass
@@ -130,8 +141,17 @@ class TestServer:
     __schedule_wrappers__: Dict[str, ScheduleWrapper]
     __scheduled_events__: Dict[str, List[ScheduledEvent]]
 
-    def __init__(self):
+    def __init__(self, route_rpc: bool = False):
+        """
+        :param route_rpc: route connected agents' ``vip.rpc.call`` and ``notify`` through this server (RPCWrapper):
+            to other connected agents' exported methods, and to the server's configuration store
+            (``config_store``, a ConfigStoreWrapper), so agents receive the configs a test stores. Off by default,
+            so tests that fake an agent's RPC themselves are unaffected.
+        """
         # Each server's state is its own: a second TestServer no longer resets a live one.
+        self.route_rpc = route_rpc
+        self.config_store = ConfigStoreWrapper(self)
+        self.__rpc_wrappers__ = {}
         self.__connected_agents__ = {}
         self.__lifecycle_methods__ = {}
         self.__methods__ = {}
@@ -380,6 +400,79 @@ class TestServer:
         agent.core._schedule_wrapper = schedule_wrapper
         
         self.__server_log__.add_agent_log(agent, logger)
+        if self.route_rpc:
+            self.__rpc_wrappers__[agent.core.identity] = RPCWrapper(agent, self)
+
+    def start_agent(self, agent: Agent, logger: Optional[Logger] = None) -> Agent:
+        """Connect an agent and run a platform's startup sequence on it: its ``onsetup`` and ``onstart`` methods
+        (those it defines), then the configuration event, which delivers its stored configs when ``route_rpc`` is
+        on. Returns the agent."""
+        self.connect_agent(agent, logger)
+        members = self.__lifecycle_methods__[agent.core.identity]
+        for member in (LifeCycleMembers.onsetup, LifeCycleMembers.onstart):
+            if member in members:
+                __execute_lifecycle_method__(agent.core.identity, member, members=members, sender='')
+        self.trigger_configuration_event(agent)
+        return agent
+
+    def stop_agent(self, identity_or_agent: [str, Agent]) -> None:
+        """Run the agent's ``onstop`` method, if it defines one, and disconnect it."""
+        identity = _identity_of(identity_or_agent)
+        members = self.__lifecycle_methods__.get(identity, {})
+        if LifeCycleMembers.onstop in members:
+            __execute_lifecycle_method__(identity, LifeCycleMembers.onstop, members=members, sender='')
+        self.disconnect_agent(identity)
+
+    def disconnect_agent(self, identity_or_agent: [str, Agent]):
+        """Forget a connected agent, as a platform does when an agent stops: it no longer receives RPC calls,
+        configuration updates or published messages, and another agent may connect with its identity."""
+        identity = _identity_of(identity_or_agent)
+        self.__check_connected__(identity)
+        for registry in (self.__connected_agents__, self.__lifecycle_methods__, self.__pubsub_wrappers__,
+                         self.__schedule_wrappers__, self.__rpc_wrappers__):
+            registry.pop(identity, None)
+
+    def connected_agent(self, identity: str) -> Agent | None:
+        """The connected agent with this identity, or None."""
+        return self.__connected_agents__.get(identity)
+
+    def trigger_configuration_event(self, identity_or_agent: [str, Agent], sender: str = ''):
+        """Send the agent core's ``configuration`` signal, which a platform sends after ``onstart``. Core's config
+        subsystem then asks the configuration store for the agent's configs (``initialize_configs``, answered by
+        ``config_store`` when ``route_rpc`` is on) and calls the agent's config callbacks for each, as on a
+        platform."""
+        identity = _identity_of(identity_or_agent)
+        self.__check_connected__(identity)
+        agent = self.__connected_agents__[identity]
+        agent.core.configuration.send(sender or agent.core)
+
+    def handle_rpc(self, caller: str, peer: str, method: str, args=(), kwargs=None):
+        """Run one routed RPC call from ``caller`` and return its result, raising what a caller on a platform
+        would get: Unreachable for a peer that is not connected, MethodNotFound for a method the peer does not
+        export, and RemoteError for an exception in the method. Arguments and the result take a JSON round trip,
+        as they do on the wire."""
+        args, kwargs = jsonapi.loads(jsonapi.dumps([list(args), dict(kwargs or {})]))
+        if peer == CONFIGURATION_STORE:
+            return _json_round_trip(self.config_store.call(caller, method, args, kwargs))
+        agent = self.__connected_agents__.get(peer)
+        if agent is None:
+            raise Unreachable(errno.EHOSTUNREACH, 'Host is unreachable', peer, 'RPC')
+        rpc = agent.vip.rpc
+        dispatcher = rpc._dispatcher
+        if dispatcher is None:                      # the agent's onsetup has not run: build what it would
+            from volttron.client.vip.agent.subsystems.rpc import Dispatcher
+            rpc.context = rpc.context or gevent.local.local()
+            dispatcher = rpc._dispatcher = Dispatcher(rpc._exports, rpc.context)
+        vip_message = SimpleNamespace(peer=caller, user=caller, subsystem='RPC', id=None,
+                                      args=[{'method': method, 'params': {'*args': args, '**kwargs': kwargs}}])
+        try:
+            result = dispatcher.method(None, None, method, args, kwargs, context=vip_message)
+        except NotImplementedError:
+            raise MethodNotFound(METHOD_NOT_FOUND, 'unimplemented method',
+                                 {'detail': f'method {method!r} is not implemented'})
+        except Exception as exc:
+            raise _remote_error(exc) from exc
+        return _json_round_trip(result)
 
     def __get_lifecycle_dict__(self, agent, core_names_found) -> Dict[LifeCycleMembers, Callable]:
         # Loop over the found lifecycle functions and find the callable associated with it.
@@ -576,3 +669,173 @@ class PubSubWrapper(SubSystemWrapper):
         result = AsyncResult()
         result.set(subscription)
         return result
+
+
+def _json_round_trip(value):
+    """The value as the other side of a VIP message sees it."""
+    return jsonapi.loads(jsonapi.dumps(value))
+
+
+def _remote_error(exc: Exception) -> RemoteError:
+    """The RemoteError a caller receives for an exception raised in an RPC method (as volttron.utils.jsonrpc's
+    Dispatcher reports it)."""
+    exc_info = dict(getattr(exc, 'exc_info', {}))
+    exc_type = type(exc)
+    exc_info.setdefault('exc_type', exc_type.__name__ if exc_type.__module__ == 'builtins'
+                        else f'{exc_type.__module__}.{exc_type.__name__}')
+    exc_info.setdefault('exc_args', list(exc.args))
+    return RemoteError(str(exc), **exc_info)
+
+
+class RPCWrapper(SubSystemWrapper):
+    """Routes one agent's ``vip.rpc.call`` and ``notify`` through its TestServer (``TestServer.handle_rpc``).
+
+    A call runs in its own greenlet and returns an AsyncResult, as on a platform, so a caller that waits with
+    ``.get()`` behaves the same and a method that calls back into its caller does not deadlock.
+    """
+
+    def __init__(self, agent: Agent, server: TestServer):
+        self._identity = agent.core.identity
+        self._server = server
+        agent.vip.rpc.call = self.call
+        agent.vip.rpc.notify = self.notify
+
+    def call(self, peer: str, method: str, *args, **kwargs) -> AsyncResult:
+        kwargs.pop('self', None)
+        if kwargs.pop('external_platform', ''):
+            raise NotImplementedError('TestServer does not route RPC calls to other platforms.')
+        result = AsyncResult()
+
+        def run():
+            try:
+                result.set(self._server.handle_rpc(self._identity, peer, method, args, kwargs))
+            except BaseException as e:                 # delivered to whoever waits on the result
+                result.set_exception(e)
+
+        gevent.spawn(run)
+        return result
+
+    def notify(self, peer: str, method: str, *args, **kwargs) -> None:
+        self.call(peer, method, *args, **kwargs)
+
+
+def process_raw_config(raw, config_type: str = 'raw'):
+    """Parse a stored configuration as the platform's configuration store does."""
+    if config_type == 'raw':
+        return raw
+    if config_type == 'json':
+        config = parse_json_config(raw)
+        if not isinstance(config, (list, dict)):
+            raise ValueError('Configuration must be a list or object.')
+        return config
+    if config_type == 'csv':
+        return [row for row in csv.DictReader(io.StringIO(raw))]
+    raise ValueError('Unsupported configuration type.')
+
+
+class ConfigStoreWrapper(SubSystemWrapper):
+    """The platform's configuration store for a TestServer.
+
+    Agents keep core's real client-side ConfigStore subsystem; this plays only the server's part, through the same
+    RPC entry points the platform's store uses. The agent's ``initialize_configs`` call at its configuration event
+    is answered with ``config.initial_update``; later stores and deletes send ``config.update``; the agent's own
+    ``vip.config.set`` and ``delete`` arrive as ``set_config`` and ``delete_config``. Callback order, references
+    (``config://``), case handling and the initial batch are therefore core's own. Updates reach an agent only once
+    it is connected, and only routed agents (``TestServer(route_rpc=True)``) call back into the store.
+    """
+
+    def __init__(self, server: TestServer):
+        self._server = server
+        # identity -> {stored name: {'type': ..., 'raw': ..., 'parsed': ...}}
+        self._stores: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    # ------------------------------------------------------------------ the test's side
+    def store(self, identity: str, config_name: str, contents: Any, config_type: str | None = None,
+              trigger_callback: bool = True, send_update: bool = True) -> None:
+        """Store a configuration for an agent, like ``vctl config store``. ``contents`` is a dict or list (stored as
+        JSON), or a string parsed as ``config_type``: ``json``, ``csv`` or ``raw`` (the default for a string)."""
+        if isinstance(contents, (dict, list)):
+            raw, config_type = jsonapi.dumps(contents), config_type or 'json'
+        else:
+            raw, config_type = str(contents), config_type or 'raw'
+        self.set_config(identity, config_name, raw, config_type, trigger_callback=trigger_callback,
+                        send_update=send_update)
+
+    def get(self, identity: str, config_name: str, raw: bool = False):
+        """A stored configuration: parsed, or as stored with ``raw``. Raises KeyError if there is none."""
+        entry = self._entry(identity, config_name)
+        return entry['raw'] if raw else entry['parsed']
+
+    def names(self, identity: str) -> List[str]:
+        return sorted(self._stores.get(identity, {}))
+
+    # ------------------------------------------------------------------ the store's RPC exports
+    def call(self, caller: str, method: str, args: list, kwargs: dict):
+        exports = {'initialize_configs': self.initialize_configs, 'set_config': self.set_config,
+                   'delete_config': self.delete_config, 'get_config': self.get_config,
+                   'list_configs': self.list_configs}
+        if method not in exports:
+            raise MethodNotFound(METHOD_NOT_FOUND, 'unimplemented method',
+                                 {'detail': f'method {method!r} is not implemented'})
+        try:
+            return exports[method](*args, **kwargs)
+        except Exception as exc:
+            raise _remote_error(exc) from exc
+
+    def initialize_configs(self, identity: str) -> None:
+        agent = self._server.connected_agent(identity)
+        if agent is not None:
+            configs = {name: entry['parsed'] for name, entry in self._stores.get(identity, {}).items()}
+            self._send(identity, 'config.initial_update', configs)
+
+    def set_config(self, identity, config_name, raw_contents, config_type='raw', trigger_callback=True,
+                   send_update=True) -> None:
+        parsed = process_raw_config(raw_contents, config_type)
+        store = self._stores.setdefault(identity, {})
+        config_name = strip_config_name(config_name)
+        existing = self._name(identity, config_name)
+        action = 'NEW' if existing is None else 'UPDATE'
+        if check_for_recursion(config_name, parsed, {n: e['parsed'] for n, e in store.items()}):
+            raise ValueError('Recursive configuration references detected.')
+        if existing is not None:
+            del store[existing]
+        store[config_name] = {'type': config_type, 'raw': raw_contents, 'parsed': parsed}
+        if send_update:
+            self._send(identity, 'config.update', action, config_name, contents=parsed,
+                       trigger_callback=trigger_callback)
+
+    def delete_config(self, identity, config_name, trigger_callback=True, send_update=True) -> None:
+        config_name = strip_config_name(config_name)
+        existing = self._name(identity, config_name)
+        if existing is None:
+            raise KeyError(f'No configuration file "{config_name}" for VIP IDENTITY {identity}')
+        del self._stores[identity][existing]
+        if send_update:
+            self._send(identity, 'config.update', 'DELETE', config_name, trigger_callback=trigger_callback)
+
+    def get_config(self, identity, config_name, raw=True):
+        return self.get(identity, config_name, raw=raw)
+
+    def list_configs(self, identity) -> List[str]:
+        return self.names(identity)
+
+    # ------------------------------------------------------------------ helpers
+    def _name(self, identity: str, config_name: str) -> str | None:
+        lower = config_name.lower()
+        return next((name for name in self._stores.get(identity, {}) if name.lower() == lower), None)
+
+    def _entry(self, identity: str, config_name: str) -> Dict[str, Any]:
+        name = self._name(identity, strip_config_name(config_name))
+        if name is None:
+            raise KeyError(f'No configuration file "{config_name}" for VIP IDENTITY {identity}')
+        return self._stores[identity][name]
+
+    def _send(self, identity: str, method: str, *args, **kwargs) -> None:
+        """Call one of the agent's config entry points, if it is connected, as the store does: a failure in the
+        agent is logged, not raised to whoever stored the config."""
+        if self._server.connected_agent(identity) is None:
+            return
+        try:
+            self._server.handle_rpc(CONFIGURATION_STORE, identity, method, args, kwargs)
+        except Exception as e:
+            _log.error(f'Agent {identity} failure when handling {method}: {e}')
