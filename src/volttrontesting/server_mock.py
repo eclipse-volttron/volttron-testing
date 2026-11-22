@@ -373,8 +373,6 @@ class TestServer:
                 core_names_found = __find_lifecycle_methods__(obj)
                 self.__lifecycle_methods__[agent.core.identity] = self.__get_lifecycle_dict__(agent, core_names_found)
 
-        if PubSubWrapper.__wrapper__ is None:
-            PubSubWrapper.__wrapper__ = self.__server_pubsub__
         self.__pubsub_wrappers__[agent.core.identity] = PubSubWrapper(agent, self)
         
         # Set up schedule wrapper
@@ -542,7 +540,6 @@ class HeartBeatWrapper(SubSystemWrapper):
 
 
 class PubSubWrapper(SubSystemWrapper):
-    __wrapper__: MemoryPubSub | None = None
 
     def __init__(self, agent: Agent, server: TestServer):
         super().__init__()
@@ -555,7 +552,9 @@ class PubSubWrapper(SubSystemWrapper):
         print("on message")
 
     def _do_publish(self, peer: str, topic: str, headers=None, message=None, bus=""):
-        self.__wrapper__.publish(topic=topic, headers=headers, message=message)
+        # Through this wrapper's own server. A class attribute set once to the first TestServer's pubsub used to
+        # route every later server's agents into that first server.
+        self._test_server.publish(topic, headers=headers, message=message, bus=bus)
         result = AsyncResult()
         result.set(topic)
         return result

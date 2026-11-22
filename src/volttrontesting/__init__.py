@@ -21,9 +21,31 @@
 #
 # ===----------------------------------------------------------------------===
 # }}}
+"""Test utilities for VOLTTRON agents.
 
-from volttrontesting.client_mock import TestClient
-from volttrontesting.platformwrapper import PlatformWrapper
-from volttrontesting.server_mock import TestServer
+The top-level names are imported on first use, not when the package is imported: ``PlatformWrapper`` pulls in the
+platform's server modules and ``grequests``, which gevent-patches ``socket`` and ``ssl`` as an import side effect.
+Code that only needs ``volttrontesting.platform_cli`` or ``volttrontesting.harness`` must not pay for that.
+"""
+import importlib
 
 __all__ = ["TestClient", "TestServer", "PlatformWrapper"]
+
+_LAZY = {
+    "TestClient": "volttrontesting.client_mock",
+    "TestServer": "volttrontesting.server_mock",
+    "PlatformWrapper": "volttrontesting.platformwrapper",
+}
+
+
+def __getattr__(name):
+    module = _LAZY.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))
