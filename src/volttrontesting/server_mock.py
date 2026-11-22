@@ -408,12 +408,23 @@ class TestServer:
         (those it defines), then the configuration event, which delivers its stored configs when ``route_rpc`` is
         on. Returns the agent."""
         self.connect_agent(agent, logger)
+        self.__subscribe_decorated__(agent)
         members = self.__lifecycle_methods__[agent.core.identity]
         for member in (LifeCycleMembers.onsetup, LifeCycleMembers.onstart):
             if member in members:
                 __execute_lifecycle_method__(agent.core.identity, member, members=members, sender='')
         self.trigger_configuration_event(agent)
         return agent
+
+    def __subscribe_decorated__(self, agent: Agent) -> None:
+        """Subscribe the agent's ``@PubSub.subscribe`` methods through its PubSubWrapper, as core's pubsub
+        subsystem does at setup (``start_agent`` only: tests that call ``connect_agent`` deliver to decorated
+        methods themselves, with intercept_agent_pubsub)."""
+        from volttron.client.vip.agent.decorators import annotations
+        wrapper = self.__pubsub_wrappers__[agent.core.identity]
+        for _name, member in inspect.getmembers(agent):
+            for peer, bus, prefix, _all_platforms, _queue in annotations(member, set, "pubsub.subscriptions"):
+                wrapper._do_subscribe(peer, prefix, member, bus=bus)
 
     def stop_agent(self, identity_or_agent: [str, Agent]) -> None:
         """Run the agent's ``onstop`` method, if it defines one, and disconnect it."""
