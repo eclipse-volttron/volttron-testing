@@ -34,6 +34,17 @@ Install volttron-testing
 pip install volttron-testing
 ```
 
+Tests that start a real platform also need a message bus and an auth module, for example as extras:
+
+```shell
+pip install "volttron-testing[zmq,libauth]"
+```
+
+## Documentation
+
+More detailed documentation, including how to use other message buses and auth modules, is in the RST source in the
+[docs](docs/source) directory of this repository.
+
 ## Testing Agent Workflows
 
 The volttron-testing library provides multiple approaches for testing VOLTTRON agents, from simple unit tests to complex integration tests with full pubsub communication.

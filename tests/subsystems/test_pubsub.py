@@ -2,6 +2,12 @@ from datetime import datetime, timezone
 
 import gevent
 import pytest
+
+# volttron-core#363: Agent.Subsystems passes itself, not the agent, as PubSub's owner, so @PubSub.subscribe and
+# @PubSub.subscribe_by_tags are never registered. Strict: these start passing (and must be unmarked) once it is fixed.
+DECORATED_SUBSCRIPTIONS_IGNORED = pytest.mark.xfail(
+    raises=KeyError, strict=True,
+    reason="volttron-core#363: decorated pubsub subscriptions are never registered")
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
@@ -48,6 +54,7 @@ class PublishFromHandlerTestAgent(Agent):
 
 
 @pytest.mark.pubsub
+@DECORATED_SUBSCRIPTIONS_IGNORED
 def test_publish_from_message_handler(volttron_instance):
     """ Tests the ability to change a status by sending a different status
     code.
@@ -65,11 +72,12 @@ def test_publish_from_message_handler(volttron_instance):
 
     # new_agent1.setup_callback("")
 
-    new_agent2.vip.pubsub.publish("pubsub", test_topic, headers={},
-                                  message="Test message").get()
-
-    poll_gevent_sleep(2, lambda: messages_contains_prefix(test_topic,
-                                                          new_agent1.subscription_results))
+    # The handler's subscription is made when the agent starts, so the first publish can precede it: repeat.
+    deadline = gevent.get_hub().loop.now() + 15
+    while not messages_contains_prefix(test_topic, new_agent1.subscription_results) \
+            and gevent.get_hub().loop.now() < deadline:
+        new_agent2.vip.pubsub.publish("pubsub", test_topic, headers={}, message="Test message").get()
+        poll_gevent_sleep(1, lambda: messages_contains_prefix(test_topic, new_agent1.subscription_results))
 
     assert new_agent1.subscription_results[test_topic][
                "message"] == "Test message"
@@ -246,6 +254,7 @@ class TestAgentPubsubByTags2(Agent):
         self.instance_subscription_results = dict()
 
 
+@pytest.mark.skip(reason="volttron-sqlite-tagging and volttron-lib-tagging are archived; their only releases require the Monolithic volttron package (>=10.0.3a9,<11), so they cannot be installed on the modular platform")
 def test_subscribe_by_tags_with_sqlite_tagging_agent(volttron_instance, tagging_agent):
     tagging_vip, pub_agent = tagging_agent
     gevent.sleep(2)
