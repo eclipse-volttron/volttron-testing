@@ -57,7 +57,7 @@ def test_agent_subscription_and_logging():
     ts.connect_agent(an_agent, log)
     
     # Set up pubsub interception for the agent
-    intercept_agent_pubsub(an_agent, TestServer.__server_pubsub__)
+    intercept_agent_pubsub(an_agent, ts.__server_pubsub__)
 
     on_messages_found = []
 
@@ -90,3 +90,13 @@ def test_agent_subscription_and_logging():
 
 def test_mock_rpc_call():
     pass
+
+
+def test_two_servers_keep_their_own_state():
+    """A second TestServer used to reset the class-level state of the first (step 7, G7)."""
+    first = TestServer()
+    first.publish('a/topic', message='one')
+    second = TestServer()
+    second.publish('b/topic', message='two')
+    assert [m.topic for m in first.get_published_messages()] == ['a/topic']
+    assert [m.topic for m in second.get_published_messages()] == ['b/topic']

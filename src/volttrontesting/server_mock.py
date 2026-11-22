@@ -130,18 +130,16 @@ class TestServer:
     __schedule_wrappers__: Dict[str, ScheduleWrapper]
     __scheduled_events__: Dict[str, List[ScheduledEvent]]
 
-    def __new__(cls, *args, **kwargs):
-        TestServer.__connected_agents__ = {}
-        TestServer.__lifecycle_methods__ = {}
-        TestServer.__methods__ = {}
-        TestServer.__pubsub_wrappers__ = {}
-        TestServer.__server_pubsub__ = MemoryPubSub()
-        TestServer.__server_log__ = ServerLogWrapper()
-        TestServer.__schedule_wrappers__ = {}
-        TestServer.__scheduled_events__ = {}
-        return super(TestServer, cls).__new__(cls)
-
     def __init__(self):
+        # Each server's state is its own: a second TestServer no longer resets a live one.
+        self.__connected_agents__ = {}
+        self.__lifecycle_methods__ = {}
+        self.__methods__ = {}
+        self.__pubsub_wrappers__ = {}
+        self.__server_pubsub__ = MemoryPubSub()
+        self.__server_log__ = ServerLogWrapper()
+        self.__schedule_wrappers__ = {}
+        self.__scheduled_events__ = {}
         self._subscribers: List[MemorySubscriber] = []
 
     @property
