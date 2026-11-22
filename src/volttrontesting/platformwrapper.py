@@ -95,14 +95,16 @@ from volttrontesting.utils import (
 
 @dataclass
 class InstallAgentOptions:
-    """Options for ``PlatformWrapper.install_agent``."""
-    start: bool = False
+    """Options for ``PlatformWrapper.install_agent``, as an alternative to its keyword arguments.
+
+    The fields are the keywords of the same names (``agent_config`` is ``config_file``) and have the same defaults.
+    Each field set to something other than its default overrides the keyword; the others leave the keyword as
+    given."""
+    start: bool = True
     vip_identity: Optional[str] = None
     agent_config: Optional[Union[dict, str]] = None
     startup_time: int = 5
     force: bool = False
-
-    # Additional options for compatibility
     tag: Optional[str] = None
     priority: Optional[int] = None
 
@@ -1011,26 +1013,6 @@ class PlatformWrapper:
         with with_os_environ(self.env):
             return is_volttron_running(self.volttron_home)
 
-    def __install_agent_wheel__(self, wheel_file, start, vip_identity):
-        with with_os_environ(self.env):
-            self.__wait_for_control_connection_to_exit__()
-
-            self.logit("VOLTTRON_HOME SETTING: {}".format(self.env['VOLTTRON_HOME']))
-            env = self.env.copy()
-            cmd = ['volttron-ctl', '--json', 'install', wheel_file]
-            if vip_identity:
-                cmd.extend(['--vip-identity', vip_identity])
-
-            res = self._vctl(cmd, json_output=True)
-            agent_uuid = res['agent_uuid']
-            self.logit(f"Inside __install_agent_wheel__ res is: {res}")
-            self.logit(agent_uuid)
-            self.logit(f"After exec install command {self.dynamic_agent.vip.peerlist().get()}")
-
-            if start:
-                self.start_agent(agent_uuid)
-            return agent_uuid
-
     def install_multiple_agents(self, agent_configs):
         """
         Installs mutltiple agents on the platform.
@@ -1069,104 +1051,80 @@ class PlatformWrapper:
                       vip_identity: Optional[str] = None,
                       startup_time: int = 5,
                       force: bool = False,
-                      install_options: Optional[InstallAgentOptions] = None):
+                      install_options: Optional[InstallAgentOptions] = None,
+                      tag: Optional[str] = None,
+                      priority: Optional[int] = None):
         """
-        Install and optionally start an agent on the instance.
+        Install an agent on the instance with ``vctl install``, and by default start it. Returns the agent's uuid.
 
-        This function allows installation from an agent wheel or an
-        agent directory (NOT BOTH).  If an agent_wheel is specified then
-        it is assumed to be ready for installation (has a config file).
-        If an agent_dir is specified then a config_file file must be
-        specified or if it is not specified then it is assumed that the
-        file agent_dir/config is to be used as the configuration file.  If
-        none of these exist then an assertion error will be thrown.
-
-        This function will return with a uuid of the installed agent.
-
-        :param agent_wheel:
-        :param agent_dir:
-        :param config_file:
-        :param start:
-        :param vip_identity:
-        :param startup_time:
-            How long in seconds is required for the agent to start up fully
-        :param force:
-            Should this overwrite the current or not.
-        :return:
+        :param agent_dir: what to install, in any form ``vctl install`` accepts: a directory with a
+            ``pyproject.toml`` (installed editable), a wheel file, or a PyPI requirement, a name with an optional
+            version constraint such as ``volttron-listener>=2.0.0rc0``.
+        :param agent_wheel: the same as ``agent_dir``, under the name Monolithic's wrapper uses for a wheel. Give
+            one of the two.
+        :param config_file: the agent's configuration, as a file path or a dict (written to a temporary file).
+        :param start: start the agent after installing it, and check that it is running.
+        :param vip_identity: the agent's identity (``--vip-identity``).
+        :param startup_time: kept for compatibility; unused.
+        :param force: replace an agent installed with the same identity (``--force``).
+        :param install_options: an InstallAgentOptions; each field it sets overrides the keyword of that name.
+        :param tag: the agent's tag (``--tag``).
+        :param priority: the agent's startup priority (``--priority``), which also enables it.
         """
-        # If InstallAgentOptions provided, use those values
-        if install_options:
-            start = install_options.start
-            vip_identity = install_options.vip_identity or vip_identity
-            config_file = install_options.agent_config or config_file
-            startup_time = install_options.startup_time
-            force = install_options.force
-            
+        if install_options is not None:
+            keywords = {'start': start, 'vip_identity': vip_identity, 'agent_config': config_file,
+                        'startup_time': startup_time, 'force': force, 'tag': tag, 'priority': priority}
+            for field in dataclasses.fields(install_options):
+                value = getattr(install_options, field.name)
+                if value != field.default:
+                    keywords[field.name] = value
+            start, vip_identity, config_file = keywords['start'], keywords['vip_identity'], keywords['agent_config']
+            force, tag, priority = keywords['force'], keywords['tag'], keywords['priority']
+
+        if (agent_wheel is None) == (agent_dir is None):
+            raise ValueError('Give exactly one of agent_dir and agent_wheel: what vctl install installs.')
+        source = str(agent_wheel if agent_wheel is not None else agent_dir)
+
         with with_os_environ(self.env):
-            _log.debug(
-                f"install_agent called with params\nagent_wheel: {agent_wheel}\nagent_dir: {agent_dir}"
-            )
+            _log.debug(f"install_agent called with source {source}")
             self.__wait_for_control_connection_to_exit__()
             assert self.is_running(), "Instance must be running to install agent."
-            assert agent_wheel or agent_dir, "Invalid agent_wheel or agent_dir."
-            assert isinstance(startup_time, int), "Startup time should be an integer."
 
-            if agent_wheel:
-                assert not agent_dir
-                assert not config_file
-                assert os.path.exists(agent_wheel)
-                wheel_file = agent_wheel
-                agent_uuid = self.__install_agent_wheel__(wheel_file, False, vip_identity)
-                assert agent_uuid
-
-            # Now if the agent_dir is specified.
             temp_config = None
-            if agent_dir:
-                assert not agent_wheel
-                temp_config = os.path.join(self.volttron_home,
-                                           os.path.basename(agent_dir) + "_config_file")
-                if isinstance(config_file, dict):
-                    from os.path import basename, join
-                    temp_config = join(self.volttron_home,
-                                       basename(agent_dir) + "_config_file")
-                    with open(temp_config, "w") as fp:
-                        fp.write(jsonapi.dumps(config_file))
-                    config_file = temp_config
-                elif config_file:
-                    if os.path.exists(config_file):
-                        pass
-                    else:
-                        raise ValueError("Config file {} doesn't exist.".format(config_file))
-                cmd = [self.vctl_exe, "--json", "install", agent_dir]
-                if config_file:
-                    cmd.extend(["--agent-config", config_file])
+            if isinstance(config_file, dict):
+                temp_config = os.path.join(self.volttron_home, f"agent_config_{uuid.uuid4().hex}.json")
+                with open(temp_config, "w") as fp:
+                    fp.write(jsonapi.dumps(config_file))
+                config_file = temp_config
+            elif config_file and not os.path.exists(config_file):
+                raise ValueError(f"Config file {config_file} doesn't exist.")
 
-                if force:
-                    cmd.extend(["--force"])
-                if vip_identity:
-                    cmd.extend(["--vip-identity", vip_identity])
-                # vctl install with start seem to have a auth issue. For now start after install
-                # if start:
-                #     cmd.extend(["--start"])
-                self.logit(f"Command installation is: {cmd}")
+            cmd = [self.vctl_exe, "--json", "install", source]
+            if config_file:
+                cmd.extend(["--agent-config", str(config_file)])
+            if force:
+                cmd.append("--force")
+            if vip_identity:
+                cmd.extend(["--vip-identity", vip_identity])
+            if tag:
+                cmd.extend(["--tag", tag])
+            if priority is not None:
+                cmd.extend(["--priority", str(priority)])
+            # The agent is started separately below rather than with --start, as before.
+            self.logit(f"Command installation is: {cmd}")
+            try:
                 resultobj = self._vctl(cmd, json_output=True)
-                self.logit(f"RESPONSE FROM INSTALL IS: {resultobj}")
-                agent_uuid = resultobj['agent_uuid']
-
-                assert resultobj
-                self.logit(f"resultobj: {resultobj}")
+            finally:
+                if temp_config and os.path.isfile(temp_config):
+                    os.remove(temp_config)
+            self.logit(f"RESPONSE FROM INSTALL IS: {resultobj}")
+            agent_uuid = resultobj['agent_uuid']
             assert agent_uuid
             time.sleep(5)
             if start:
                 self.logit(f"We are running {agent_uuid}")
-                # call start after install for now. vctl install with start seem to have auth issues.
                 self.start_agent(agent_uuid)
                 assert self.is_agent_running(agent_uuid)
-
-            # remove temp config_file
-            if temp_config and os.path.isfile(temp_config):
-                os.remove(temp_config)
-
             return agent_uuid
 
     def __wait_for_control_connection_to_exit__(self, timeout: int = 10):
@@ -1328,32 +1286,32 @@ class PlatformWrapper:
         self.logit(f"Mock vctl command: {' '.join(command)}")
         return f"Mock: Command executed successfully"
 
-    def install_library(self, library_path: Union[str, Path]) -> str:
+    def install_library(self, source: Union[str, Path], force: bool = False, pre_release: bool = False) -> str:
         """
-        Install a library (e.g., a driver library) into the platform.
-        
-        :param library_path: Path to the library directory or wheel file
-        :return: Installation result/output
+        Install a library (a driver interface, say) into the platform's environment with ``vctl install-lib``, so
+        the platform records it as it records an agent. Returns the installed library's name as vctl reports it.
+
+        :param source: anything ``vctl install-lib`` accepts: a directory with a ``pyproject.toml`` (built into a
+            wheel), a wheel file, or a PyPI requirement, with an optional version constraint.
+        :param force: reinstall the library (``--force``).
+        :param pre_release: allow pre-releases (``--pre-release``).
         """
-        library_path = Path(library_path).resolve()
-        
-        if not library_path.exists():
-            raise ValueError(f"Library path does not exist: {library_path}")
-            
         with with_os_environ(self.env):
-            self.logit(f"Installing library from {library_path}")
-            
-            # If it's a directory, we need to build/install it
-            if library_path.is_dir():
-                # Use pip to install in editable mode for development
-                cmd = [sys.executable, "-m", "pip", "install", "-e", str(library_path)]
-            else:
-                # If it's a wheel file, install directly
-                cmd = [sys.executable, "-m", "pip", "install", str(library_path)]
-                
-            result = execute_command(cmd, env=self.env, logger=_log)
-            self.logit(f"Library installation complete: {result}")
-            return result
+            self.logit(f"Installing library from {source}")
+            cmd = [self.vctl_exe, "install-lib", str(source)]
+            if force:
+                cmd.append("--force")
+            if pre_release:
+                cmd.append("--pre-release")
+            output = self._vctl(cmd)
+            self.logit(f"Library installation complete: {output}")
+            installed = re.findall(r"^Installed (\S+)", output, flags=re.MULTILINE)
+            return installed[-1] if installed else output.strip()
+
+    def remove_library(self, library: str) -> None:
+        """Remove a library installed with ``install_library`` (``vctl remove-lib``), by its distribution name."""
+        with with_os_environ(self.env):
+            self._vctl([self.vctl_exe, "remove-lib", library])
 
     def remove_agent(self, agent_uuid):
         """Remove the agent specified by agent_uuid"""
