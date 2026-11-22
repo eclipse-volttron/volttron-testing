@@ -26,13 +26,17 @@ Fixtures
     A separate started ``PlatformCLI`` with the web service and one web user, available as
     ``web_platform.web_user``.
 
+``platform``
+    A platform under test on one backend: in process, or a real platform. See :ref:`Testing-Platform`.
+
 ``platform_driver``
-    The Platform Driver installed on ``platform_cli``, as a ``DriverHandle``. It offers:
+    The Platform Driver installed on ``platform``, on whichever backend the test runs, as a ``DriverHandle``. It
+    offers:
 
     - ``store_registry(name, rows_or_path)``;
     - ``store_device(topic, config)``;
     - ``get``, ``set`` and ``revert`` for points;
-    - ``cli``, the platform.
+    - ``platform``, the platform it is installed on.
 
     To put the driver on another platform, for example ``web_platform``, call
     ``volttrontesting.plugin.install_platform_driver(cli)``.
