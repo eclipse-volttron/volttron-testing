@@ -183,6 +183,7 @@ BACKEND_TESTS = {
 
         @pytest.mark.platform_backend("cli")
         def test_cli_cannot_subscribe(platform):
+            platform._subscribe_json = False        # as with a core whose vctl subscribe has no --json
             platform.subscribe("x")
         ''',
 }

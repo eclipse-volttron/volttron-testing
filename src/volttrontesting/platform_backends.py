@@ -350,6 +350,8 @@ class CliPlatform:
         self.cli = cli
         self._tags: dict[str, str] = {}
         self._rpc_call: bool | None = None
+        self._subscribe_json: bool | None = None
+        self._subscribers: list = []
 
     def install_agent(self, source, identity: str, tag: str | None = None, *, config=None) -> None:
         tag = tag or identity
@@ -391,8 +393,43 @@ class CliPlatform:
     def revert(self, topic: str):
         return self.cli.revert(topic)
 
-    def subscribe(self, prefix: str) -> Observer:
-        raise NotSupported(self.backend, "subscribe", "vctl has no machine-readable subscribe; use the wrapper backend")
+    def subscribe(self, prefix: str, timeout: float = 60.0) -> Observer:
+        """Follow ``vctl --json subscribe`` (volttron-core#390), one JSON message per line, until shutdown."""
+        import subprocess
+        import threading
+        if self._subscribe_json is None:
+            self._subscribe_json = "--json" in self.cli._run(["vctl", "subscribe", "--help"], check=False).stdout
+        if not self._subscribe_json:
+            raise NotSupported(self.backend, "subscribe",
+                               "this volttron-core's vctl subscribe has no --json (volttron-core#390)")
+        observer = Observer(prefix)
+        process = subprocess.Popen([str(self.cli.bin / "vctl"), "--json", "subscribe", prefix], env=self.cli.env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+        self._subscribers.append(process)
+        subscribed = threading.Event()
+
+        def read_status():
+            for line in process.stderr:
+                if line.startswith("Subscribed to"):
+                    subscribed.set()
+
+        def read_messages():
+            for line in process.stdout:
+                try:
+                    m = json.loads(line)
+                except ValueError:
+                    continue
+                observer.messages.append(PublishedMessage(topic=m["topic"], headers=m["headers"],
+                                                          message=m["message"], bus=m["bus"]))
+
+        for reader in (read_status, read_messages):
+            threading.Thread(target=reader, daemon=True).start()
+        deadline = time.monotonic() + timeout
+        while not subscribed.is_set():
+            if process.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(f"vctl subscribe {prefix} did not start (exit {process.poll()})")
+            time.sleep(0.1)
+        return observer
 
     def publish(self, topic: str, headers: dict | None = None, message=None) -> None:
         # vctl publish sends its data as a string, so publish through a control connection with JSON values. It
@@ -415,6 +452,14 @@ class CliPlatform:
         return self.cli.wait_for_log(pattern, timeout=timeout, since=since)
 
     def shutdown(self) -> None:
+        for process in self._subscribers:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except Exception:
+                    process.kill()
+        self._subscribers.clear()
         self.cli.shutdown()
 
 

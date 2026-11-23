@@ -47,8 +47,8 @@ Operations
     The platform log.
 
 An operation a backend cannot do raises ``NotSupported``, which is reported as a skip that names the backend. For
-example, the ``cli`` backend cannot subscribe, and calls RPC only when the installed core's ``vctl`` has ``rpc
-call``.
+example, the ``cli`` backend calls RPC only when the installed core's ``vctl`` has ``rpc call``, and subscribes only
+when its ``vctl subscribe`` has ``--json``.
 
 
 Choosing backends
