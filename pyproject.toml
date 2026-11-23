@@ -20,18 +20,35 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
-pytest = "^7.0.0"
+pytest = ">=7.0"
 # mock is built-in for Python 3.3+ as unittest.mock
 anypubsub = "^0.6"
 # todo remove dependency on grequests
 grequests = "^0.6.0"
 volttron-core = ">=2.0.0rc16"
-volttron-lib-auth = ">=2.0.0rc6"
+# The message bus and the auth module a test runs with are the user's choice, installed as extras (zmq, libauth) or
+# as the bus's or auth module's own distribution with an adapter of its own; see docs/source/adapters.rst.
+volttron-lib-zmq = { version = ">=2.0.0rc12", optional = true }
+volttron-lib-auth = { version = ">=2.0.0rc6", optional = true }
 python-dateutil = "^2.8.2"
-docker = "^6.0.1"
+docker = ">=7.1"    # 6.x fails with requests 2.32+: "Not supported URL scheme http+docker"
 pytest-timeout = "^2.3.1"
 
+[tool.poetry.plugins."pytest11"]
+# Named after the module, so "-p volttrontesting.plugin" in a repository's configuration is harmless when the entry
+# point already loaded it.
+"volttrontesting.plugin" = "volttrontesting.plugin"
+
+[tool.poetry.extras]
+zmq = ["volttron-lib-zmq"]
+libauth = ["volttron-lib-auth"]
+
 [tool.poetry.group.dev.dependencies]
+# volttron-testing's own platform tests run on zmq with lib-auth. They belong in `poetry install --extras "zmq
+# libauth"`, but the shared github-tooling run-tests workflow cannot pass extras yet (github-tooling#54), so the dev
+# group repeats them.
+volttron-lib-zmq = ">=2.0.0rc12"
+volttron-lib-auth = ">=2.0.0rc6"
 #volttron-core = { path="../volttron-core", develop = true}
 # formatting, quality, tests
 pre-commit = "^2.17.0"

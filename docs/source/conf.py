@@ -26,9 +26,9 @@
 
 # -- Project information
 
-project = 'volttron-volttrontesting'
-copyright = '2022, PNNL'
-author = 'PNNL'
+project = 'volttron-testing'
+copyright = '2022, VOLTTRON Team'
+author = 'VOLTTRON Team'
 
 release = '0.1'
 version = '0.1.0'

@@ -249,8 +249,8 @@ def test_integrated_pubsub_simple():
     server.connect_agent(subscriber)
     
     # Intercept their pubsub to route through test server
-    pub_interceptor = intercept_agent_pubsub(publisher, TestServer.__server_pubsub__)
-    sub_interceptor = intercept_agent_pubsub(subscriber, TestServer.__server_pubsub__)
+    pub_interceptor = intercept_agent_pubsub(publisher, server.__server_pubsub__)
+    sub_interceptor = intercept_agent_pubsub(subscriber, server.__server_pubsub__)
     
     # Publisher publishes through intercepted pubsub
     print(f"Publishing through intercepted pubsub...")
